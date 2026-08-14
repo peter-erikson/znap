@@ -11,6 +11,8 @@ const class_name = std.unicode.utf8ToUtf16LeStringLiteral("Znap.MessageWindow");
 const documentation_url = std.unicode.utf8ToUtf16LeStringLiteral("https://github.com/peter-erikson/znap");
 const startup_key = std.unicode.utf8ToUtf16LeStringLiteral("SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Run");
 const startup_value = std.unicode.utf8ToUtf16LeStringLiteral("Znap");
+const single_instance_mutex_name = std.unicode.utf8ToUtf16LeStringLiteral("Local\\Znap.SingleInstance");
+const already_running_message = std.unicode.utf8ToUtf16LeStringLiteral("Znap is already running.");
 
 const tray_message = c.WM_APP + 1;
 const tray_id = 1;
@@ -73,6 +75,15 @@ var corner_turns = [_]u2{0} ** 4;
 var center_turn: u2 = 0;
 
 pub fn main() !void {
+    const single_instance_mutex = c.CreateMutexW(null, c.TRUE, single_instance_mutex_name);
+    if (single_instance_mutex == null) return error.CreateSingleInstanceMutexFailed;
+    defer _ = c.CloseHandle(single_instance_mutex);
+
+    if (c.GetLastError() == c.ERROR_ALREADY_EXISTS) {
+        _ = c.MessageBoxW(null, already_running_message, app_name, c.MB_OK | c.MB_ICONINFORMATION);
+        return;
+    }
+
     _ = c.SetProcessDpiAwarenessContext(c.ZnapPerMonitorV2());
 
     const instance = c.GetModuleHandleW(null);
