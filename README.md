@@ -10,10 +10,10 @@ A dependency-free Zig 0.16 port of [ahmetb/RectangleWin](https://github.com/ahme
 | Cycle the right edge through 1/2, 2/3, and 1/3 width | `Win` + `Ctrl` + `Alt` + `Right` |
 | Cycle the top edge through 1/2, 2/3, and 1/3 height | `Win` + `Ctrl` + `Alt` + `Up` |
 | Cycle the bottom edge through 1/2, 2/3, and 1/3 height | `Win` + `Ctrl` + `Alt` + `Down` |
-| Cycle the top-left corner through 1/2, 2/3, and 1/3 width | `Win` + `Shift` + `Alt` + `Left` |
-| Cycle the top-right corner through 1/2, 2/3, and 1/3 width | `Win` + `Shift` + `Alt` + `Up` |
-| Cycle the bottom-left corner through 1/2, 2/3, and 1/3 width | `Win` + `Shift` + `Alt` + `Down` |
-| Cycle the bottom-right corner through 1/2, 2/3, and 1/3 width | `Win` + `Shift` + `Alt` + `Right` |
+| Cycle the top-left corner through 1/2, 2/3, and 1/3 width | `Win` + `Ctrl` + `Alt` + `Insert` |
+| Cycle the top-right corner through 1/2, 2/3, and 1/3 width | `Win` + `Ctrl` + `Alt` + `Page Up` |
+| Cycle the bottom-left corner through 1/2, 2/3, and 1/3 width | `Win` + `Ctrl` + `Alt` + `Delete` |
+| Cycle the bottom-right corner through 1/2, 2/3, and 1/3 width | `Win` + `Ctrl` + `Alt` + `Page Down` |
 | Cycle a centered, full-height window through 1/2, 2/3, and 1/3 width | `Win` + `Ctrl` + `Alt` + `C` or `Win` + `Ctrl` + `Alt` + `\` |
 | Maximize the current window | `Win` + `Ctrl` + `Alt` + `F` or `Win` + `Ctrl` + `Alt` + `Enter` |
 | Toggle always-on-top | `Win` + `Ctrl` + `Alt` + `A` |
