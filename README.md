@@ -1,4 +1,4 @@
-# RectangleWin (Zig port)
+# Znap (RectangleWin Zig port)
 
 A dependency-free Zig 0.16 port of [ahmetb/RectangleWin](https://github.com/ahmetb/RectangleWin), a hotkey-oriented window snapping utility for Windows 10 and 11.
 
@@ -28,7 +28,7 @@ Install Zig 0.16.0, then run:
 zig build -Doptimize=ReleaseSafe
 ```
 
-The executable is written to `zig-out/bin/RectangleWin.exe`. No Go runtime or third-party Zig package is required.
+The executable is written to `zig-out/bin/Znap.exe`. No Go runtime or third-party Zig package is required.
 
 Run the unit tests with:
 
@@ -42,4 +42,4 @@ The application calls Win32 directly. Its C declarations are generated at build 
 
 ## License and attribution
 
-This is a clean Zig-language port of RectangleWin by Ahmet Alp Balkan. It preserves the upstream icon assets and behavior and is distributed under the Apache License 2.0. See [LICENSE](LICENSE) and [NOTICE](NOTICE).
+This is a clean Zig-language port of RectangleWin by Ahmet Alp Balkan. It preserves the upstream behavior and is distributed under the Apache License 2.0. See [LICENSE](LICENSE) and [NOTICE](NOTICE).

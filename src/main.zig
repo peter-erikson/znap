@@ -73,7 +73,7 @@ var corner_turns = [_]u2{0} ** 4;
 var center_turn: u2 = 0;
 
 pub fn main() !void {
-    _ = c.SetProcessDpiAwarenessContext(c.RectangleWinPerMonitorV2());
+    _ = c.SetProcessDpiAwarenessContext(c.ZnapPerMonitorV2());
 
     const instance = c.GetModuleHandleW(null);
     var window_class: c.WNDCLASSEXW = std.mem.zeroes(c.WNDCLASSEXW);
@@ -267,7 +267,7 @@ fn fromWinRect(rect: c.RECT) geometry.Rect {
 fn toggleAlwaysOnTop(hwnd: c.HWND) void {
     if (!isZonableWindow(hwnd)) return;
     const style: u32 = @bitCast(c.GetWindowLongW(hwnd, c.GWL_EXSTYLE));
-    const insert_after: c.HWND = if ((style & c.WS_EX_TOPMOST) != 0) c.RectangleWinHwndNotopmost() else c.RectangleWinHwndTopmost();
+    const insert_after: c.HWND = if ((style & c.WS_EX_TOPMOST) != 0) c.ZnapHwndNotopmost() else c.ZnapHwndTopmost();
     _ = c.SetWindowPos(hwnd, insert_after, 0, 0, 0, 0, c.SWP_NOMOVE | c.SWP_NOSIZE | c.SWP_NOACTIVATE);
 }
 
@@ -360,7 +360,7 @@ fn showTrayMenu(hwnd: c.HWND) void {
 
 fn autoRunEnabled() bool {
     var key: c.HKEY = null;
-    const current_user: c.HKEY = c.RectangleWinHkeyCurrentUser();
+    const current_user: c.HKEY = c.ZnapHkeyCurrentUser();
     if (c.RegOpenKeyExW(current_user, startup_key, 0, c.KEY_QUERY_VALUE, &key) != c.ERROR_SUCCESS) return false;
     defer _ = c.RegCloseKey(key);
     var value_type: c.DWORD = 0;
@@ -370,7 +370,7 @@ fn autoRunEnabled() bool {
 
 fn enableAutoRun() void {
     var key: c.HKEY = null;
-    const current_user: c.HKEY = c.RectangleWinHkeyCurrentUser();
+    const current_user: c.HKEY = c.ZnapHkeyCurrentUser();
     if (c.RegOpenKeyExW(current_user, startup_key, 0, c.KEY_SET_VALUE, &key) != c.ERROR_SUCCESS) return;
     defer _ = c.RegCloseKey(key);
 
@@ -388,7 +388,7 @@ fn enableAutoRun() void {
 
 fn disableAutoRun() void {
     var key: c.HKEY = null;
-    const current_user: c.HKEY = c.RectangleWinHkeyCurrentUser();
+    const current_user: c.HKEY = c.ZnapHkeyCurrentUser();
     if (c.RegOpenKeyExW(current_user, startup_key, 0, c.KEY_SET_VALUE, &key) != c.ERROR_SUCCESS) return;
     defer _ = c.RegCloseKey(key);
     _ = c.RegDeleteValueW(key, startup_value);

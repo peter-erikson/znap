@@ -5,7 +5,7 @@ Based on RectangleWin:
 Copyright 2022 Ahmet Alp Balkan
 https://github.com/ahmetb/RectangleWin
 
-This product includes software and icon assets developed by Ahmet Alp Balkan
+This product is based on software developed by Ahmet Alp Balkan
 and licensed under the Apache License, Version 2.0. The implementation was
 rewritten from Go to Zig and replaces the Go dependencies with direct Win32 API
 calls.

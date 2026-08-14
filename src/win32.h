@@ -8,7 +8,7 @@
 #include <shellapi.h>
 #include <dwmapi.h>
 
-DPI_AWARENESS_CONTEXT RectangleWinPerMonitorV2(void);
-HWND RectangleWinHwndTopmost(void);
-HWND RectangleWinHwndNotopmost(void);
-HKEY RectangleWinHkeyCurrentUser(void);
+DPI_AWARENESS_CONTEXT ZnapPerMonitorV2(void);
+HWND ZnapHwndTopmost(void);
+HWND ZnapHwndNotopmost(void);
+HKEY ZnapHkeyCurrentUser(void);

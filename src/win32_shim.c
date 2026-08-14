@@ -3,18 +3,18 @@
 #endif
 #include "win32.h"
 
-DPI_AWARENESS_CONTEXT RectangleWinPerMonitorV2(void) {
+DPI_AWARENESS_CONTEXT ZnapPerMonitorV2(void) {
     return DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2;
 }
 
-HWND RectangleWinHwndTopmost(void) {
+HWND ZnapHwndTopmost(void) {
     return HWND_TOPMOST;
 }
 
-HWND RectangleWinHwndNotopmost(void) {
+HWND ZnapHwndNotopmost(void) {
     return HWND_NOTOPMOST;
 }
 
-HKEY RectangleWinHkeyCurrentUser(void) {
+HKEY ZnapHkeyCurrentUser(void) {
     return HKEY_CURRENT_USER;
 }
