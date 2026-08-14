@@ -6,11 +6,11 @@ comptime {
     @setEvalBranchQuota(20_000);
 }
 
-const app_name = std.unicode.utf8ToUtf16LeStringLiteral("RectangleWin");
-const class_name = std.unicode.utf8ToUtf16LeStringLiteral("RectangleWin.MessageWindow");
-const documentation_url = std.unicode.utf8ToUtf16LeStringLiteral("https://github.com/ahmetb/RectangleWin");
+const app_name = std.unicode.utf8ToUtf16LeStringLiteral("Znap");
+const class_name = std.unicode.utf8ToUtf16LeStringLiteral("Znap.MessageWindow");
+const documentation_url = std.unicode.utf8ToUtf16LeStringLiteral("https://github.com/peter-erikson/znap");
 const startup_key = std.unicode.utf8ToUtf16LeStringLiteral("SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Run");
-const startup_value = std.unicode.utf8ToUtf16LeStringLiteral("RectangleWin");
+const startup_value = std.unicode.utf8ToUtf16LeStringLiteral("Znap");
 
 const tray_message = c.WM_APP + 1;
 const tray_id = 1;

@@ -26,7 +26,7 @@ pub fn build(b: *std.Build) void {
         root_module.linkSystemLibrary(lib, .{});
     }
 
-    const exe = b.addExecutable(.{ .name = "RectangleWin", .root_module = root_module });
+    const exe = b.addExecutable(.{ .name = "Znap", .root_module = root_module });
     exe.subsystem = if (console) .Console else .Windows;
     b.installArtifact(exe);
 

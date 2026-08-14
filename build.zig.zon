@@ -1,7 +1,7 @@
 .{
-    .name = .rectangle_win,
-    .fingerprint = 0x61d0de07ec4ddc53,
-    .version = "0.1.0",
+    .name = .znap,
+    .fingerprint = 0x4b6c52146e0e844b,
+    .version = "1.0.0",
     .minimum_zig_version = "0.16.0",
     .dependencies = .{},
     .paths = .{
