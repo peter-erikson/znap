@@ -49,17 +49,17 @@ const mod_norepeat: u32 = 0x4000;
 const hotkeys = hotkeys: {
     @setEvalBranchQuota(20_000);
     break :hotkeys [_]Hotkey{
-        .{ .id = 1, .modifiers = mod_alt | mod_win | mod_norepeat, .key = c.VK_LEFT, .action = .edge_left, .description = std.unicode.utf8ToUtf16LeStringLiteral("Win + Alt + Left") },
-        .{ .id = 2, .modifiers = mod_alt | mod_win | mod_norepeat, .key = c.VK_RIGHT, .action = .edge_right, .description = std.unicode.utf8ToUtf16LeStringLiteral("Win + Alt + Right") },
-        .{ .id = 3, .modifiers = mod_alt | mod_win | mod_norepeat, .key = c.VK_UP, .action = .edge_top, .description = std.unicode.utf8ToUtf16LeStringLiteral("Win + Alt + Up") },
-        .{ .id = 4, .modifiers = mod_alt | mod_win | mod_norepeat, .key = c.VK_DOWN, .action = .edge_bottom, .description = std.unicode.utf8ToUtf16LeStringLiteral("Win + Alt + Down") },
-        .{ .id = 5, .modifiers = mod_control | mod_alt | mod_win | mod_norepeat, .key = c.VK_LEFT, .action = .corner_top_left, .description = std.unicode.utf8ToUtf16LeStringLiteral("Win + Ctrl + Alt + Left") },
-        .{ .id = 6, .modifiers = mod_control | mod_alt | mod_win | mod_norepeat, .key = c.VK_UP, .action = .corner_top_right, .description = std.unicode.utf8ToUtf16LeStringLiteral("Win + Ctrl + Alt + Up") },
-        .{ .id = 7, .modifiers = mod_control | mod_alt | mod_win | mod_norepeat, .key = c.VK_DOWN, .action = .corner_bottom_left, .description = std.unicode.utf8ToUtf16LeStringLiteral("Win + Ctrl + Alt + Down") },
-        .{ .id = 8, .modifiers = mod_control | mod_alt | mod_win | mod_norepeat, .key = c.VK_RIGHT, .action = .corner_bottom_right, .description = std.unicode.utf8ToUtf16LeStringLiteral("Win + Ctrl + Alt + Right") },
-        .{ .id = 50, .modifiers = mod_shift | mod_win | mod_norepeat, .key = 'F', .action = .maximize, .description = std.unicode.utf8ToUtf16LeStringLiteral("Win + Shift + F") },
-        .{ .id = 60, .modifiers = mod_alt | mod_win | mod_norepeat, .key = 'C', .action = .center, .description = std.unicode.utf8ToUtf16LeStringLiteral("Win + Alt + C") },
-        .{ .id = 70, .modifiers = mod_alt | mod_win | mod_norepeat, .key = 'A', .action = .always_on_top, .description = std.unicode.utf8ToUtf16LeStringLiteral("Win + Alt + A") },
+        .{ .id = 1, .modifiers = mod_control | mod_alt | mod_win | mod_norepeat, .key = c.VK_LEFT, .action = .edge_left, .description = std.unicode.utf8ToUtf16LeStringLiteral("Win + Ctrl + Alt + Left") },
+        .{ .id = 2, .modifiers = mod_control | mod_alt | mod_win | mod_norepeat, .key = c.VK_RIGHT, .action = .edge_right, .description = std.unicode.utf8ToUtf16LeStringLiteral("Win + Ctrl + Alt + Right") },
+        .{ .id = 3, .modifiers = mod_control | mod_alt | mod_win | mod_norepeat, .key = c.VK_UP, .action = .edge_top, .description = std.unicode.utf8ToUtf16LeStringLiteral("Win + Ctrl + Alt + Up") },
+        .{ .id = 4, .modifiers = mod_control | mod_alt | mod_win | mod_norepeat, .key = c.VK_DOWN, .action = .edge_bottom, .description = std.unicode.utf8ToUtf16LeStringLiteral("Win + Ctrl + Alt + Down") },
+        .{ .id = 5, .modifiers = mod_shift | mod_alt | mod_win | mod_norepeat, .key = c.VK_LEFT, .action = .corner_top_left, .description = std.unicode.utf8ToUtf16LeStringLiteral("Win + Shift + Alt + Left") },
+        .{ .id = 6, .modifiers = mod_shift | mod_alt | mod_win | mod_norepeat, .key = c.VK_UP, .action = .corner_top_right, .description = std.unicode.utf8ToUtf16LeStringLiteral("Win + Shift + Alt + Up") },
+        .{ .id = 7, .modifiers = mod_shift | mod_alt | mod_win | mod_norepeat, .key = c.VK_DOWN, .action = .corner_bottom_left, .description = std.unicode.utf8ToUtf16LeStringLiteral("Win + Shift + Alt + Down") },
+        .{ .id = 8, .modifiers = mod_shift | mod_alt | mod_win | mod_norepeat, .key = c.VK_RIGHT, .action = .corner_bottom_right, .description = std.unicode.utf8ToUtf16LeStringLiteral("Win + Shift + Alt + Right") },
+        .{ .id = 50, .modifiers = mod_control | mod_alt | mod_win | mod_norepeat, .key = 'F', .action = .maximize, .description = std.unicode.utf8ToUtf16LeStringLiteral("Win + Ctrl + Alt + F") },
+        .{ .id = 60, .modifiers = mod_control | mod_alt | mod_win | mod_norepeat, .key = 'C', .action = .center, .description = std.unicode.utf8ToUtf16LeStringLiteral("Win + Ctrl + Alt + C") },
+        .{ .id = 70, .modifiers = mod_control | mod_alt | mod_win | mod_norepeat, .key = 'A', .action = .always_on_top, .description = std.unicode.utf8ToUtf16LeStringLiteral("Win + Ctrl + Alt + A") },
     };
 };
 
