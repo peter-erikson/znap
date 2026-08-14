@@ -58,6 +58,7 @@ const hotkeys = hotkeys: {
         .{ .id = 7, .modifiers = mod_shift | mod_alt | mod_win | mod_norepeat, .key = c.VK_DOWN, .action = .corner_bottom_left, .description = std.unicode.utf8ToUtf16LeStringLiteral("Win + Shift + Alt + Down") },
         .{ .id = 8, .modifiers = mod_shift | mod_alt | mod_win | mod_norepeat, .key = c.VK_RIGHT, .action = .corner_bottom_right, .description = std.unicode.utf8ToUtf16LeStringLiteral("Win + Shift + Alt + Right") },
         .{ .id = 50, .modifiers = mod_control | mod_alt | mod_win | mod_norepeat, .key = 'F', .action = .maximize, .description = std.unicode.utf8ToUtf16LeStringLiteral("Win + Ctrl + Alt + F") },
+        .{ .id = 51, .modifiers = mod_control | mod_alt | mod_win | mod_norepeat, .key = c.VK_RETURN, .action = .maximize, .description = std.unicode.utf8ToUtf16LeStringLiteral("Win + Ctrl + Alt + Enter") },
         .{ .id = 60, .modifiers = mod_control | mod_alt | mod_win | mod_norepeat, .key = c.VK_OEM_5, .action = .center, .description = std.unicode.utf8ToUtf16LeStringLiteral("Win + Ctrl + Alt + \\") },
         .{ .id = 61, .modifiers = mod_control | mod_alt | mod_win | mod_norepeat, .key = 'C', .action = .center, .description = std.unicode.utf8ToUtf16LeStringLiteral("Win + Ctrl + Alt + C") },
         .{ .id = 70, .modifiers = mod_control | mod_alt | mod_win | mod_norepeat, .key = 'A', .action = .always_on_top, .description = std.unicode.utf8ToUtf16LeStringLiteral("Win + Ctrl + Alt + A") },
