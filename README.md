@@ -6,11 +6,17 @@ A dependency-free Zig 0.16 port of [ahmetb/RectangleWin](https://github.com/ahme
 
 | Action | Shortcut |
 | --- | --- |
-| Cycle left/right/top/bottom through 1/2, 2/3, and 1/3 | `Win` + `Alt` + arrow |
-| Cycle top-left/top-right/bottom-left/bottom-right corners | `Win` + `Ctrl` + `Alt` + arrow |
-| Center the current window | `Win` + `Alt` + `C` |
-| Maximize the current window | `Win` + `Shift` + `F` |
-| Toggle always-on-top | `Win` + `Alt` + `A` |
+| Cycle the left edge through 1/2, 2/3, and 1/3 width | `Win` + `Ctrl` + `Alt` + `Left` |
+| Cycle the right edge through 1/2, 2/3, and 1/3 width | `Win` + `Ctrl` + `Alt` + `Right` |
+| Cycle the top edge through 1/2, 2/3, and 1/3 height | `Win` + `Ctrl` + `Alt` + `Up` |
+| Cycle the bottom edge through 1/2, 2/3, and 1/3 height | `Win` + `Ctrl` + `Alt` + `Down` |
+| Cycle the top-left corner through 1/2, 2/3, and 1/3 width | `Win` + `Shift` + `Alt` + `Left` |
+| Cycle the top-right corner through 1/2, 2/3, and 1/3 width | `Win` + `Shift` + `Alt` + `Up` |
+| Cycle the bottom-left corner through 1/2, 2/3, and 1/3 width | `Win` + `Shift` + `Alt` + `Down` |
+| Cycle the bottom-right corner through 1/2, 2/3, and 1/3 width | `Win` + `Shift` + `Alt` + `Right` |
+| Cycle a centered, full-height window through 1/2, 2/3, and 1/3 width | `Win` + `Ctrl` + `Alt` + `C` |
+| Maximize the current window | `Win` + `Ctrl` + `Alt` + `F` |
+| Toggle always-on-top | `Win` + `Ctrl` + `Alt` + `A` |
 
 The notification-area menu links to the original documentation, toggles launch at sign-in, and exits the application.
 

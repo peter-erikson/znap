@@ -40,7 +40,9 @@ pub const Placement = enum {
     bottom_right_half,
     bottom_right_two_thirds,
     bottom_right_one_third,
-    center,
+    center_half,
+    center_two_thirds,
+    center_one_third,
 };
 
 fn left(d: Rect, numerator: i32, denominator: i32) Rect {
@@ -65,7 +67,13 @@ fn merge(horizontal: Rect, vertical: Rect) Rect {
     return .{ .left = horizontal.left, .top = vertical.top, .right = horizontal.right, .bottom = vertical.bottom };
 }
 
-pub fn place(placement: Placement, display: Rect, current: Rect) Rect {
+fn centerFullHeight(d: Rect, numerator: i32, denominator: i32) Rect {
+    const width = @divTrunc(d.width() * numerator, denominator);
+    const left_edge = d.left + @divTrunc(d.width() - width, 2);
+    return .{ .left = left_edge, .top = d.top, .right = left_edge + width, .bottom = d.bottom };
+}
+
+pub fn place(placement: Placement, display: Rect, _: Rect) Rect {
     return switch (placement) {
         .left_half => left(display, 1, 2),
         .left_two_thirds => left(display, 2, 3),
@@ -91,12 +99,9 @@ pub fn place(placement: Placement, display: Rect, current: Rect) Rect {
         .bottom_right_half => merge(right(display, 1, 2), bottom(display, 1, 2)),
         .bottom_right_two_thirds => merge(right(display, 2, 3), bottom(display, 1, 2)),
         .bottom_right_one_third => merge(right(display, 1, 3), bottom(display, 1, 2)),
-        .center => .{
-            .left = display.left + @divTrunc(display.width() - current.width(), 2),
-            .top = display.top + @divTrunc(display.height() - current.height(), 2),
-            .right = display.left + @divTrunc(display.width() - current.width(), 2) + current.width(),
-            .bottom = display.top + @divTrunc(display.height() - current.height(), 2) + current.height(),
-        },
+        .center_half => centerFullHeight(display, 1, 2),
+        .center_two_thirds => centerFullHeight(display, 2, 3),
+        .center_one_third => centerFullHeight(display, 1, 3),
     };
 }
 
@@ -106,8 +111,9 @@ test "edge and corner placements preserve offset monitor coordinates" {
     try std.testing.expectEqual(Rect{ .left = 740, .top = -900, .right = 2020, .bottom = -360 }, place(.top_right_two_thirds, display, undefined));
 }
 
-test "center retains the current size" {
-    const display: Rect = .{ .left = 0, .top = 0, .right = 1920, .bottom = 1040 };
-    const current: Rect = .{ .left = 20, .top = 40, .right = 820, .bottom = 640 };
-    try std.testing.expectEqual(Rect{ .left = 560, .top = 220, .right = 1360, .bottom = 820 }, place(.center, display, current));
+test "center placements fill height and cycle the edge widths" {
+    const display: Rect = .{ .left = 100, .top = -900, .right = 2020, .bottom = 180 };
+    try std.testing.expectEqual(Rect{ .left = 580, .top = -900, .right = 1540, .bottom = 180 }, place(.center_half, display, undefined));
+    try std.testing.expectEqual(Rect{ .left = 420, .top = -900, .right = 1700, .bottom = 180 }, place(.center_two_thirds, display, undefined));
+    try std.testing.expectEqual(Rect{ .left = 740, .top = -900, .right = 1380, .bottom = 180 }, place(.center_one_third, display, undefined));
 }
