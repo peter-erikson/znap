@@ -1,4 +1,4 @@
 #include <windows.h>
 
-1 ICON "assets/icon.ico"
-2 ICON "assets/tray_icon.ico"
+1 ICON "assets/znap_icon.ico"
+2 ICON "assets/znap_tray_icon.ico"
