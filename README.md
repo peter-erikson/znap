@@ -14,7 +14,7 @@ A dependency-free Zig 0.16 port of [ahmetb/RectangleWin](https://github.com/ahme
 | Cycle the top-right corner through 1/2, 2/3, and 1/3 width | `Win` + `Shift` + `Alt` + `Up` |
 | Cycle the bottom-left corner through 1/2, 2/3, and 1/3 width | `Win` + `Shift` + `Alt` + `Down` |
 | Cycle the bottom-right corner through 1/2, 2/3, and 1/3 width | `Win` + `Shift` + `Alt` + `Right` |
-| Cycle a centered, full-height window through 1/2, 2/3, and 1/3 width | `Win` + `Ctrl` + `Alt` + `C` |
+| Cycle a centered, full-height window through 1/2, 2/3, and 1/3 width | `Win` + `Ctrl` + `Alt` + `C` or `Win` + `Ctrl` + `Alt` + `\` |
 | Maximize the current window | `Win` + `Ctrl` + `Alt` + `F` |
 | Toggle always-on-top | `Win` + `Ctrl` + `Alt` + `A` |
 
