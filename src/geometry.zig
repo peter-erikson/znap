@@ -1,0 +1,113 @@
+const std = @import("std");
+
+pub const Rect = struct {
+    left: i32,
+    top: i32,
+    right: i32,
+    bottom: i32,
+
+    pub fn width(self: Rect) i32 {
+        return self.right - self.left;
+    }
+
+    pub fn height(self: Rect) i32 {
+        return self.bottom - self.top;
+    }
+};
+
+pub const Placement = enum {
+    left_half,
+    left_two_thirds,
+    left_one_third,
+    right_half,
+    right_two_thirds,
+    right_one_third,
+    top_half,
+    top_two_thirds,
+    top_one_third,
+    bottom_half,
+    bottom_two_thirds,
+    bottom_one_third,
+    top_left_half,
+    top_left_two_thirds,
+    top_left_one_third,
+    top_right_half,
+    top_right_two_thirds,
+    top_right_one_third,
+    bottom_left_half,
+    bottom_left_two_thirds,
+    bottom_left_one_third,
+    bottom_right_half,
+    bottom_right_two_thirds,
+    bottom_right_one_third,
+    center,
+};
+
+fn left(d: Rect, numerator: i32, denominator: i32) Rect {
+    return .{ .left = d.left, .top = d.top, .right = d.left + @divTrunc(d.width() * numerator, denominator), .bottom = d.bottom };
+}
+
+fn right(d: Rect, numerator: i32, denominator: i32) Rect {
+    const width = @divTrunc(d.width() * numerator, denominator);
+    return .{ .left = d.right - width, .top = d.top, .right = d.right, .bottom = d.bottom };
+}
+
+fn top(d: Rect, numerator: i32, denominator: i32) Rect {
+    return .{ .left = d.left, .top = d.top, .right = d.right, .bottom = d.top + @divTrunc(d.height() * numerator, denominator) };
+}
+
+fn bottom(d: Rect, numerator: i32, denominator: i32) Rect {
+    const height = @divTrunc(d.height() * numerator, denominator);
+    return .{ .left = d.left, .top = d.bottom - height, .right = d.right, .bottom = d.bottom };
+}
+
+fn merge(horizontal: Rect, vertical: Rect) Rect {
+    return .{ .left = horizontal.left, .top = vertical.top, .right = horizontal.right, .bottom = vertical.bottom };
+}
+
+pub fn place(placement: Placement, display: Rect, current: Rect) Rect {
+    return switch (placement) {
+        .left_half => left(display, 1, 2),
+        .left_two_thirds => left(display, 2, 3),
+        .left_one_third => left(display, 1, 3),
+        .right_half => right(display, 1, 2),
+        .right_two_thirds => right(display, 2, 3),
+        .right_one_third => right(display, 1, 3),
+        .top_half => top(display, 1, 2),
+        .top_two_thirds => top(display, 2, 3),
+        .top_one_third => top(display, 1, 3),
+        .bottom_half => bottom(display, 1, 2),
+        .bottom_two_thirds => bottom(display, 2, 3),
+        .bottom_one_third => bottom(display, 1, 3),
+        .top_left_half => merge(left(display, 1, 2), top(display, 1, 2)),
+        .top_left_two_thirds => merge(left(display, 2, 3), top(display, 1, 2)),
+        .top_left_one_third => merge(left(display, 1, 3), top(display, 1, 2)),
+        .top_right_half => merge(right(display, 1, 2), top(display, 1, 2)),
+        .top_right_two_thirds => merge(right(display, 2, 3), top(display, 1, 2)),
+        .top_right_one_third => merge(right(display, 1, 3), top(display, 1, 2)),
+        .bottom_left_half => merge(left(display, 1, 2), bottom(display, 1, 2)),
+        .bottom_left_two_thirds => merge(left(display, 2, 3), bottom(display, 1, 2)),
+        .bottom_left_one_third => merge(left(display, 1, 3), bottom(display, 1, 2)),
+        .bottom_right_half => merge(right(display, 1, 2), bottom(display, 1, 2)),
+        .bottom_right_two_thirds => merge(right(display, 2, 3), bottom(display, 1, 2)),
+        .bottom_right_one_third => merge(right(display, 1, 3), bottom(display, 1, 2)),
+        .center => .{
+            .left = display.left + @divTrunc(display.width() - current.width(), 2),
+            .top = display.top + @divTrunc(display.height() - current.height(), 2),
+            .right = display.left + @divTrunc(display.width() - current.width(), 2) + current.width(),
+            .bottom = display.top + @divTrunc(display.height() - current.height(), 2) + current.height(),
+        },
+    };
+}
+
+test "edge and corner placements preserve offset monitor coordinates" {
+    const display: Rect = .{ .left = 100, .top = -900, .right = 2020, .bottom = 180 };
+    try std.testing.expectEqual(Rect{ .left = 100, .top = -900, .right = 1060, .bottom = 180 }, place(.left_half, display, undefined));
+    try std.testing.expectEqual(Rect{ .left = 740, .top = -900, .right = 2020, .bottom = -360 }, place(.top_right_two_thirds, display, undefined));
+}
+
+test "center retains the current size" {
+    const display: Rect = .{ .left = 0, .top = 0, .right = 1920, .bottom = 1040 };
+    const current: Rect = .{ .left = 20, .top = 40, .right = 820, .bottom = 640 };
+    try std.testing.expectEqual(Rect{ .left = 560, .top = 220, .right = 1360, .bottom = 820 }, place(.center, display, current));
+}
