@@ -33,6 +33,8 @@ const HotkeyAction = enum {
     maximize,
     center,
     always_on_top,
+    store_snapshot,
+    recall_snapshot,
 };
 
 const Hotkey = struct {
@@ -41,6 +43,7 @@ const Hotkey = struct {
     key: u32,
     action: HotkeyAction,
     description: [*:0]const u16,
+    snapshot_index: u4 = 0,
 };
 
 const mod_alt: u32 = 0x0001;
@@ -63,6 +66,26 @@ const hotkeys = hotkeys: {
         .{ .id = 50, .modifiers = mod_control | mod_alt | mod_win | mod_norepeat, .key = c.VK_RETURN, .action = .maximize, .description = std.unicode.utf8ToUtf16LeStringLiteral("Win + Ctrl + Alt + Enter") },
         .{ .id = 60, .modifiers = mod_control | mod_alt | mod_win | mod_norepeat, .key = c.VK_OEM_5, .action = .center, .description = std.unicode.utf8ToUtf16LeStringLiteral("Win + Ctrl + Alt + \\") },
         .{ .id = 70, .modifiers = mod_control | mod_alt | mod_win | mod_norepeat, .key = 'A', .action = .always_on_top, .description = std.unicode.utf8ToUtf16LeStringLiteral("Win + Ctrl + Alt + A") },
+        .{ .id = 80, .modifiers = mod_shift | mod_alt | mod_win | mod_norepeat, .key = '1', .action = .store_snapshot, .description = std.unicode.utf8ToUtf16LeStringLiteral("Win + Shift + Alt + 1"), .snapshot_index = 0 },
+        .{ .id = 81, .modifiers = mod_control | mod_alt | mod_win | mod_norepeat, .key = '1', .action = .recall_snapshot, .description = std.unicode.utf8ToUtf16LeStringLiteral("Win + Ctrl + Alt + 1"), .snapshot_index = 0 },
+        .{ .id = 82, .modifiers = mod_shift | mod_alt | mod_win | mod_norepeat, .key = '2', .action = .store_snapshot, .description = std.unicode.utf8ToUtf16LeStringLiteral("Win + Shift + Alt + 2"), .snapshot_index = 1 },
+        .{ .id = 83, .modifiers = mod_control | mod_alt | mod_win | mod_norepeat, .key = '2', .action = .recall_snapshot, .description = std.unicode.utf8ToUtf16LeStringLiteral("Win + Ctrl + Alt + 2"), .snapshot_index = 1 },
+        .{ .id = 84, .modifiers = mod_shift | mod_alt | mod_win | mod_norepeat, .key = '3', .action = .store_snapshot, .description = std.unicode.utf8ToUtf16LeStringLiteral("Win + Shift + Alt + 3"), .snapshot_index = 2 },
+        .{ .id = 85, .modifiers = mod_control | mod_alt | mod_win | mod_norepeat, .key = '3', .action = .recall_snapshot, .description = std.unicode.utf8ToUtf16LeStringLiteral("Win + Ctrl + Alt + 3"), .snapshot_index = 2 },
+        .{ .id = 86, .modifiers = mod_shift | mod_alt | mod_win | mod_norepeat, .key = '4', .action = .store_snapshot, .description = std.unicode.utf8ToUtf16LeStringLiteral("Win + Shift + Alt + 4"), .snapshot_index = 3 },
+        .{ .id = 87, .modifiers = mod_control | mod_alt | mod_win | mod_norepeat, .key = '4', .action = .recall_snapshot, .description = std.unicode.utf8ToUtf16LeStringLiteral("Win + Ctrl + Alt + 4"), .snapshot_index = 3 },
+        .{ .id = 88, .modifiers = mod_shift | mod_alt | mod_win | mod_norepeat, .key = '5', .action = .store_snapshot, .description = std.unicode.utf8ToUtf16LeStringLiteral("Win + Shift + Alt + 5"), .snapshot_index = 4 },
+        .{ .id = 89, .modifiers = mod_control | mod_alt | mod_win | mod_norepeat, .key = '5', .action = .recall_snapshot, .description = std.unicode.utf8ToUtf16LeStringLiteral("Win + Ctrl + Alt + 5"), .snapshot_index = 4 },
+        .{ .id = 90, .modifiers = mod_shift | mod_alt | mod_win | mod_norepeat, .key = '6', .action = .store_snapshot, .description = std.unicode.utf8ToUtf16LeStringLiteral("Win + Shift + Alt + 6"), .snapshot_index = 5 },
+        .{ .id = 91, .modifiers = mod_control | mod_alt | mod_win | mod_norepeat, .key = '6', .action = .recall_snapshot, .description = std.unicode.utf8ToUtf16LeStringLiteral("Win + Ctrl + Alt + 6"), .snapshot_index = 5 },
+        .{ .id = 92, .modifiers = mod_shift | mod_alt | mod_win | mod_norepeat, .key = '7', .action = .store_snapshot, .description = std.unicode.utf8ToUtf16LeStringLiteral("Win + Shift + Alt + 7"), .snapshot_index = 6 },
+        .{ .id = 93, .modifiers = mod_control | mod_alt | mod_win | mod_norepeat, .key = '7', .action = .recall_snapshot, .description = std.unicode.utf8ToUtf16LeStringLiteral("Win + Ctrl + Alt + 7"), .snapshot_index = 6 },
+        .{ .id = 94, .modifiers = mod_shift | mod_alt | mod_win | mod_norepeat, .key = '8', .action = .store_snapshot, .description = std.unicode.utf8ToUtf16LeStringLiteral("Win + Shift + Alt + 8"), .snapshot_index = 7 },
+        .{ .id = 95, .modifiers = mod_control | mod_alt | mod_win | mod_norepeat, .key = '8', .action = .recall_snapshot, .description = std.unicode.utf8ToUtf16LeStringLiteral("Win + Ctrl + Alt + 8"), .snapshot_index = 7 },
+        .{ .id = 96, .modifiers = mod_shift | mod_alt | mod_win | mod_norepeat, .key = '9', .action = .store_snapshot, .description = std.unicode.utf8ToUtf16LeStringLiteral("Win + Shift + Alt + 9"), .snapshot_index = 8 },
+        .{ .id = 97, .modifiers = mod_control | mod_alt | mod_win | mod_norepeat, .key = '9', .action = .recall_snapshot, .description = std.unicode.utf8ToUtf16LeStringLiteral("Win + Ctrl + Alt + 9"), .snapshot_index = 8 },
+        .{ .id = 98, .modifiers = mod_shift | mod_alt | mod_win | mod_norepeat, .key = '0', .action = .store_snapshot, .description = std.unicode.utf8ToUtf16LeStringLiteral("Win + Shift + Alt + 0"), .snapshot_index = 9 },
+        .{ .id = 99, .modifiers = mod_control | mod_alt | mod_win | mod_norepeat, .key = '0', .action = .recall_snapshot, .description = std.unicode.utf8ToUtf16LeStringLiteral("Win + Ctrl + Alt + 0"), .snapshot_index = 9 },
     };
 };
 
@@ -73,6 +96,31 @@ var edge_turns = [_]u2{0} ** 4;
 var corner_turns = [_]u2{0} ** 4;
 var center_turn: u2 = 0;
 var maximize_states: window_states.Store = .{};
+
+const snapshot_capacity = 64;
+const occluder_capacity = 1024;
+
+const SnapshotEntry = struct {
+    hwnd: c.HWND,
+    placement: c.WINDOWPLACEMENT,
+};
+
+const WindowSnapshot = struct {
+    entries: [snapshot_capacity]SnapshotEntry = undefined,
+    count: usize = 0,
+    focused: c.HWND = null,
+    stored: bool = false,
+};
+
+const SnapshotCapture = struct {
+    monitor: c.HMONITOR,
+    entries: [snapshot_capacity]SnapshotEntry = undefined,
+    entry_count: usize = 0,
+    occluders: [occluder_capacity]c.RECT = undefined,
+    occluder_count: usize = 0,
+};
+
+var snapshots = [_]WindowSnapshot{.{}} ** 10;
 
 pub fn main() !void {
     const single_instance_mutex = c.CreateMutexW(null, c.TRUE, single_instance_mutex_name);
@@ -173,9 +221,124 @@ fn handleHotkey(id: i32) void {
             .maximize => toggleMaximize(c.GetForegroundWindow()),
             .center => cycleCenter(),
             .always_on_top => toggleAlwaysOnTop(c.GetForegroundWindow()),
+            .store_snapshot => storeSnapshot(hotkey.snapshot_index),
+            .recall_snapshot => recallSnapshot(hotkey.snapshot_index),
         }
         return;
     }
+}
+
+fn storeSnapshot(snapshot_index: usize) void {
+    const focused = c.GetForegroundWindow();
+    if (focused == null) return;
+    const monitor = c.MonitorFromWindow(focused, c.MONITOR_DEFAULTTONEAREST);
+    if (monitor == null) return;
+
+    var capture: SnapshotCapture = .{ .monitor = monitor };
+    _ = c.EnumWindows(captureSnapshotWindow, @bitCast(@intFromPtr(&capture)));
+
+    const snapshot = &snapshots[snapshot_index];
+    snapshot.count = capture.entry_count;
+    @memcpy(snapshot.entries[0..capture.entry_count], capture.entries[0..capture.entry_count]);
+    snapshot.focused = null;
+    for (snapshot.entries[0..snapshot.count]) |entry| {
+        if (entry.hwnd == focused) {
+            snapshot.focused = focused;
+            break;
+        }
+    }
+    snapshot.stored = true;
+}
+
+fn captureSnapshotWindow(hwnd: c.HWND, lparam: c.LPARAM) callconv(.c) c.BOOL {
+    const capture: *SnapshotCapture = @ptrFromInt(@as(usize, @bitCast(lparam)));
+    if (!isOccludingWindow(hwnd)) return c.TRUE;
+
+    var bounds: c.RECT = undefined;
+    if (!getVisibleWindowBounds(hwnd, &bounds)) return c.TRUE;
+
+    const ex_style: u32 = @bitCast(c.GetWindowLongW(hwnd, c.GWL_EXSTYLE));
+    // Always-on-top windows are outside snapshot semantics: do not save them,
+    // and do not treat them as covering ordinary windows underneath them.
+    if ((ex_style & c.WS_EX_TOPMOST) != 0) return c.TRUE;
+
+    const on_current_monitor = c.MonitorFromWindow(hwnd, c.MONITOR_DEFAULTTONEAREST) == capture.monitor;
+    if (on_current_monitor and
+        isZonableWindow(hwnd) and
+        !isCovered(bounds, capture.occluders[0..capture.occluder_count]) and
+        capture.entry_count < capture.entries.len)
+    {
+        var placement: c.WINDOWPLACEMENT = std.mem.zeroes(c.WINDOWPLACEMENT);
+        placement.length = @sizeOf(c.WINDOWPLACEMENT);
+        if (c.GetWindowPlacement(hwnd, &placement) != 0) {
+            capture.entries[capture.entry_count] = .{ .hwnd = hwnd, .placement = placement };
+            capture.entry_count += 1;
+        }
+    }
+
+    // EnumWindows visits ordinary windows from highest to lowest Z order, so
+    // each one can cover later ordinary windows.
+    if (capture.occluder_count == capture.occluders.len) return c.FALSE;
+    capture.occluders[capture.occluder_count] = bounds;
+    capture.occluder_count += 1;
+    return c.TRUE;
+}
+
+fn recallSnapshot(snapshot_index: usize) void {
+    const snapshot = &snapshots[snapshot_index];
+    if (!snapshot.stored) return;
+    resetCycles();
+
+    for (snapshot.entries[0..snapshot.count]) |entry| {
+        if (c.IsWindow(entry.hwnd) == 0 or !isZonableWindow(entry.hwnd)) continue;
+        var placement = entry.placement;
+        placement.length = @sizeOf(c.WINDOWPLACEMENT);
+        _ = c.SetWindowPlacement(entry.hwnd, &placement);
+        maximize_states.remove(@intFromPtr(entry.hwnd.?));
+    }
+
+    // Entries were captured from front to back. Raise them in reverse so the
+    // whole snapshot ends above other normal windows in its captured order.
+    // Toggling through the topmost band forces Windows to promote windows owned
+    // by other processes; HWND_NOTOPMOST immediately restores ordinary status.
+    const raise_flags = c.SWP_NOMOVE | c.SWP_NOSIZE | c.SWP_NOACTIVATE;
+    var index = snapshot.count;
+    while (index > 0) {
+        index -= 1;
+        const hwnd = snapshot.entries[index].hwnd;
+        if (c.IsWindow(hwnd) == 0 or !isZonableWindow(hwnd)) continue;
+        if (c.SetWindowPos(hwnd, c.ZnapHwndTopmost(), 0, 0, 0, 0, raise_flags) != 0) {
+            _ = c.SetWindowPos(hwnd, c.ZnapHwndNotopmost(), 0, 0, 0, 0, raise_flags);
+        }
+    }
+
+    if (snapshot.focused != null and c.IsWindow(snapshot.focused) != 0 and isZonableWindow(snapshot.focused)) {
+        if (c.IsIconic(snapshot.focused) != 0) _ = c.ShowWindow(snapshot.focused, c.SW_RESTORE);
+        _ = c.SetForegroundWindow(snapshot.focused);
+    }
+}
+
+fn isOccludingWindow(hwnd: c.HWND) bool {
+    if (hwnd == null or c.IsWindowVisible(hwnd) == 0 or c.IsIconic(hwnd) != 0) return false;
+    if (hwnd == c.GetDesktopWindow() or hwnd == c.GetShellWindow()) return false;
+
+    var cloaked: c.DWORD = 0;
+    if (c.DwmGetWindowAttribute(hwnd, c.DWMWA_CLOAKED, &cloaked, @sizeOf(c.DWORD)) == 0 and cloaked != 0) return false;
+    return true;
+}
+
+fn getVisibleWindowBounds(hwnd: c.HWND, bounds: *c.RECT) bool {
+    if (c.DwmGetWindowAttribute(hwnd, c.DWMWA_EXTENDED_FRAME_BOUNDS, bounds, @sizeOf(c.RECT)) != 0 and
+        c.GetWindowRect(hwnd, bounds) == 0) return false;
+    return bounds.right > bounds.left and bounds.bottom > bounds.top;
+}
+
+fn isCovered(bounds: c.RECT, occluders: []const c.RECT) bool {
+    for (occluders) |occluder| {
+        if (bounds.left < occluder.right and bounds.right > occluder.left and
+            bounds.top < occluder.bottom and bounds.bottom > occluder.top) return true;
+    }
+    return false;
 }
 
 const edge_cycles = [4][3]geometry.Placement{

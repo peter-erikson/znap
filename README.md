@@ -17,6 +17,8 @@ A dependency-free Zig 0.16 port of [ahmetb/RectangleWin](https://github.com/ahme
 | Cycle a centered, full-height window through 1/2, 2/3, and 1/3 width | `Win` + `Ctrl` + `Alt` + `\` |
 | Toggle maximize, restoring the previous state or a centered state if unknown | `Win` + `Ctrl` + `Alt` + `Enter` |
 | Toggle always-on-top | `Win` + `Ctrl` + `Alt` + `A` |
+| Store the fully visible ordinary windows in snapshot 1–9 or 0, ignoring always-on-top overlays | `Win` + `Shift` + `Alt` + `1`–`9` or `0` |
+| Recall snapshot 1–9 or 0, raise its windows, and restore focus | `Win` + `Ctrl` + `Alt` + `1`–`9` or `0` |
 
 The notification-area menu links to the original documentation, toggles launch at sign-in, and exits the application.
 
