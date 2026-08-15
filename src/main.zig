@@ -1,6 +1,7 @@
 const std = @import("std");
 const c = @import("win32");
 const geometry = @import("geometry.zig");
+const window_states = @import("window_states.zig");
 
 comptime {
     @setEvalBranchQuota(20_000);
@@ -73,6 +74,7 @@ var last_resized: c.HWND = null;
 var edge_turns = [_]u2{0} ** 4;
 var corner_turns = [_]u2{0} ** 4;
 var center_turn: u2 = 0;
+var maximize_states: window_states.Store = .{};
 
 pub fn main() !void {
     const single_instance_mutex = c.CreateMutexW(null, c.TRUE, single_instance_mutex_name);
@@ -170,11 +172,7 @@ fn handleHotkey(id: i32) void {
             .corner_top_right => cycleCorner(1),
             .corner_bottom_left => cycleCorner(2),
             .corner_bottom_right => cycleCorner(3),
-            .maximize => {
-                resetCycles();
-                const hwnd = c.GetForegroundWindow();
-                if (isZonableWindow(hwnd)) _ = c.ShowWindow(hwnd, c.SW_MAXIMIZE);
-            },
+            .maximize => toggleMaximize(c.GetForegroundWindow()),
             .center => cycleCenter(),
             .always_on_top => toggleAlwaysOnTop(c.GetForegroundWindow()),
         }
@@ -242,6 +240,29 @@ fn resetCycles() void {
     center_turn = 0;
 }
 
+fn toggleMaximize(hwnd: c.HWND) void {
+    resetCycles();
+    if (!isZonableWindow(hwnd)) return;
+
+    const key = @intFromPtr(hwnd.?);
+    if (c.IsZoomed(hwnd) != 0) {
+        if (maximize_states.get(key)) |bounds| {
+            _ = c.ShowWindow(hwnd, c.SW_RESTORE);
+            const restored = c.SetWindowPos(hwnd, null, bounds.left, bounds.top, bounds.width(), bounds.height(), c.SWP_NOZORDER | c.SWP_NOACTIVATE) != 0;
+            if (restored) maximize_states.remove(key);
+        } else if (resizeWindow(hwnd, .center_half)) {
+            center_turn = 1;
+        }
+        return;
+    }
+
+    var bounds: c.RECT = undefined;
+    if (c.GetWindowRect(hwnd, &bounds) == 0) return;
+    maximize_states.remember(key, fromWinRect(bounds));
+    _ = c.ShowWindow(hwnd, c.SW_MAXIMIZE);
+    if (c.IsZoomed(hwnd) == 0) maximize_states.remove(key);
+}
+
 fn resizeWindow(hwnd: c.HWND, placement: geometry.Placement) bool {
     if (!isZonableWindow(hwnd)) return false;
 
@@ -269,7 +290,10 @@ fn resizeWindow(hwnd: c.HWND, placement: geometry.Placement) bool {
     target.bottom += window_rect.bottom - frame.bottom;
 
     const ok = c.SetWindowPos(hwnd, null, target.left, target.top, target.width(), target.height(), c.SWP_NOZORDER | c.SWP_NOACTIVATE) != 0;
-    if (ok) last_resized = hwnd;
+    if (ok) {
+        last_resized = hwnd;
+        maximize_states.remove(@intFromPtr(hwnd.?));
+    }
     return ok;
 }
 
