@@ -14,8 +14,8 @@ A dependency-free Zig 0.16 port of [ahmetb/RectangleWin](https://github.com/ahme
 | Cycle the top-right corner through 1/2, 2/3, and 1/3 width | `Win` + `Ctrl` + `Alt` + `Page Up` |
 | Cycle the bottom-left corner through 1/2, 2/3, and 1/3 width | `Win` + `Ctrl` + `Alt` + `Delete` |
 | Cycle the bottom-right corner through 1/2, 2/3, and 1/3 width | `Win` + `Ctrl` + `Alt` + `Page Down` |
-| Cycle a centered, full-height window through 1/2, 2/3, and 1/3 width | `Win` + `Ctrl` + `Alt` + `C` or `Win` + `Ctrl` + `Alt` + `\` |
-| Toggle maximize, restoring the previous state or a centered state if unknown | `Win` + `Ctrl` + `Alt` + `F` or `Win` + `Ctrl` + `Alt` + `Enter` |
+| Cycle a centered, full-height window through 1/2, 2/3, and 1/3 width | `Win` + `Ctrl` + `Alt` + `\` |
+| Toggle maximize, restoring the previous state or a centered state if unknown | `Win` + `Ctrl` + `Alt` + `Enter` |
 | Toggle always-on-top | `Win` + `Ctrl` + `Alt` + `A` |
 
 The notification-area menu links to the original documentation, toggles launch at sign-in, and exits the application.

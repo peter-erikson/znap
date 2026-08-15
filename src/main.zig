@@ -60,10 +60,8 @@ const hotkeys = hotkeys: {
         .{ .id = 6, .modifiers = mod_control | mod_alt | mod_win | mod_norepeat, .key = c.VK_DELETE, .action = .corner_bottom_left, .description = std.unicode.utf8ToUtf16LeStringLiteral("Win + Ctrl + Alt + Delete") },
         .{ .id = 7, .modifiers = mod_control | mod_alt | mod_win | mod_norepeat, .key = c.VK_PRIOR, .action = .corner_top_right, .description = std.unicode.utf8ToUtf16LeStringLiteral("Win + Ctrl + Alt + Page Up") },
         .{ .id = 8, .modifiers = mod_control | mod_alt | mod_win | mod_norepeat, .key = c.VK_NEXT, .action = .corner_bottom_right, .description = std.unicode.utf8ToUtf16LeStringLiteral("Win + Ctrl + Alt + Page Down") },
-        .{ .id = 50, .modifiers = mod_control | mod_alt | mod_win | mod_norepeat, .key = 'F', .action = .maximize, .description = std.unicode.utf8ToUtf16LeStringLiteral("Win + Ctrl + Alt + F") },
-        .{ .id = 51, .modifiers = mod_control | mod_alt | mod_win | mod_norepeat, .key = c.VK_RETURN, .action = .maximize, .description = std.unicode.utf8ToUtf16LeStringLiteral("Win + Ctrl + Alt + Enter") },
+        .{ .id = 50, .modifiers = mod_control | mod_alt | mod_win | mod_norepeat, .key = c.VK_RETURN, .action = .maximize, .description = std.unicode.utf8ToUtf16LeStringLiteral("Win + Ctrl + Alt + Enter") },
         .{ .id = 60, .modifiers = mod_control | mod_alt | mod_win | mod_norepeat, .key = c.VK_OEM_5, .action = .center, .description = std.unicode.utf8ToUtf16LeStringLiteral("Win + Ctrl + Alt + \\") },
-        .{ .id = 61, .modifiers = mod_control | mod_alt | mod_win | mod_norepeat, .key = 'C', .action = .center, .description = std.unicode.utf8ToUtf16LeStringLiteral("Win + Ctrl + Alt + C") },
         .{ .id = 70, .modifiers = mod_control | mod_alt | mod_win | mod_norepeat, .key = 'A', .action = .always_on_top, .description = std.unicode.utf8ToUtf16LeStringLiteral("Win + Ctrl + Alt + A") },
     };
 };
