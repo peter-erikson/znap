@@ -245,14 +245,17 @@ fn resetCycles() void {
 fn resizeWindow(hwnd: c.HWND, placement: geometry.Placement) bool {
     if (!isZonableWindow(hwnd)) return false;
 
-    var window_rect: c.RECT = undefined;
-    if (c.GetWindowRect(hwnd, &window_rect) == 0) return false;
     const monitor = c.MonitorFromWindow(hwnd, c.MONITOR_DEFAULTTONEAREST);
     if (monitor == null) return false;
     var monitor_info: c.MONITORINFO = std.mem.zeroes(c.MONITORINFO);
     monitor_info.cbSize = @sizeOf(c.MONITORINFO);
     if (c.GetMonitorInfoW(monitor, &monitor_info) == 0) return false;
 
+    // Maximized windows use different invisible frame margins. Restore before
+    // measuring them so the compensation below matches the resized window.
+    _ = c.ShowWindow(hwnd, c.SW_RESTORE);
+    var window_rect: c.RECT = undefined;
+    if (c.GetWindowRect(hwnd, &window_rect) == 0) return false;
     var frame = window_rect;
     _ = c.DwmGetWindowAttribute(hwnd, c.DWMWA_EXTENDED_FRAME_BOUNDS, &frame, @sizeOf(c.RECT));
     const current = fromWinRect(frame);
@@ -265,7 +268,6 @@ fn resizeWindow(hwnd: c.HWND, placement: geometry.Placement) bool {
     target.right += window_rect.right - frame.right;
     target.bottom += window_rect.bottom - frame.bottom;
 
-    _ = c.ShowWindow(hwnd, c.SW_RESTORE);
     const ok = c.SetWindowPos(hwnd, null, target.left, target.top, target.width(), target.height(), c.SWP_NOZORDER | c.SWP_NOACTIVATE) != 0;
     if (ok) last_resized = hwnd;
     return ok;
