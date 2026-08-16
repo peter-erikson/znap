@@ -57,11 +57,11 @@ Run the unit tests with:
 
 ```powershell
 zig build test
+```
 
 ## Install / Start
 
 Save Znap.exe anywhere on your hard drive and run it (if you build from source you can just keep it in the projects zig-out folder).
-```
 
 ## Implementation
 
