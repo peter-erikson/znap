@@ -15,6 +15,12 @@ pub const Rect = struct {
     }
 };
 
+pub fn overlapsBeyondTolerance(a: Rect, b: Rect, tolerance: i32) bool {
+    const overlap_width = @min(a.right, b.right) - @max(a.left, b.left);
+    const overlap_height = @min(a.bottom, b.bottom) - @max(a.top, b.top);
+    return overlap_width > tolerance and overlap_height > tolerance;
+}
+
 pub const Placement = enum {
     left_half,
     left_two_thirds,
@@ -116,4 +122,14 @@ test "center placements fill height and cycle the edge widths" {
     try std.testing.expectEqual(Rect{ .left = 580, .top = -900, .right = 1540, .bottom = 180 }, place(.center_half, display, undefined));
     try std.testing.expectEqual(Rect{ .left = 420, .top = -900, .right = 1700, .bottom = 180 }, place(.center_two_thirds, display, undefined));
     try std.testing.expectEqual(Rect{ .left = 740, .top = -900, .right = 1380, .bottom = 180 }, place(.center_one_third, display, undefined));
+}
+
+test "overlap tolerance ignores thin edge and corner intersections" {
+    const window: Rect = .{ .left = 0, .top = 0, .right = 100, .bottom = 100 };
+
+    try std.testing.expect(!overlapsBeyondTolerance(window, .{ .left = 98, .top = 0, .right = 150, .bottom = 100 }, 2));
+    try std.testing.expect(overlapsBeyondTolerance(window, .{ .left = 97, .top = 0, .right = 150, .bottom = 100 }, 2));
+    try std.testing.expect(!overlapsBeyondTolerance(window, .{ .left = 97, .top = 98, .right = 150, .bottom = 150 }, 2));
+    try std.testing.expect(overlapsBeyondTolerance(window, .{ .left = 97, .top = 97, .right = 150, .bottom = 150 }, 2));
+    try std.testing.expect(!overlapsBeyondTolerance(window, .{ .left = 100, .top = 0, .right = 150, .bottom = 100 }, 2));
 }

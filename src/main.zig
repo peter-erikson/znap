@@ -99,6 +99,7 @@ var maximize_states: window_states.Store = .{};
 
 const snapshot_capacity = 64;
 const occluder_capacity = 1024;
+const snapshot_edge_overlap_tolerance: i32 = 2;
 
 const SnapshotEntry = struct {
     hwnd: c.HWND,
@@ -389,8 +390,7 @@ fn getVisibleWindowBounds(hwnd: c.HWND, bounds: *c.RECT) bool {
 
 fn isCovered(bounds: c.RECT, occluders: []const c.RECT) bool {
     for (occluders) |occluder| {
-        if (bounds.left < occluder.right and bounds.right > occluder.left and
-            bounds.top < occluder.bottom and bounds.bottom > occluder.top) return true;
+        if (geometry.overlapsBeyondTolerance(fromWinRect(bounds), fromWinRect(occluder), snapshot_edge_overlap_tolerance)) return true;
     }
     return false;
 }
