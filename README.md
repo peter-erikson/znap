@@ -21,6 +21,7 @@ A dependency-free Zig 0.16 port of [ahmetb/RectangleWin](https://github.com/ahme
 | Recall snapshot 1–9 or 0, raise its windows, and restore focus | `Win` + `Ctrl` + `Alt` + `1`–`9` or `0` |
 
 The notification-area menu links to the original documentation, toggles launch at sign-in, and exits the application.
+Successfully stored windows briefly wiggle down and back up as confirmation.
 
 ## Build
 

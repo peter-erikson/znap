@@ -120,6 +120,12 @@ const SnapshotCapture = struct {
     occluder_count: usize = 0,
 };
 
+const AnimationWindow = struct {
+    hwnd: c.HWND,
+    left: i32,
+    top: i32,
+};
+
 var snapshots = [_]WindowSnapshot{.{}} ** 10;
 
 pub fn main() !void {
@@ -248,6 +254,30 @@ fn storeSnapshot(snapshot_index: usize) void {
         }
     }
     snapshot.stored = true;
+    animateStoredSnapshot(snapshot);
+}
+
+fn animateStoredSnapshot(snapshot: *const WindowSnapshot) void {
+    var windows: [snapshot_capacity]AnimationWindow = undefined;
+    var window_count: usize = 0;
+    for (snapshot.entries[0..snapshot.count]) |entry| {
+        if (c.IsWindow(entry.hwnd) == 0 or !isZonableWindow(entry.hwnd)) continue;
+        var bounds: c.RECT = undefined;
+        if (c.GetWindowRect(entry.hwnd, &bounds) == 0) continue;
+        windows[window_count] = .{ .hwnd = entry.hwnd, .left = bounds.left, .top = bounds.top };
+        window_count += 1;
+    }
+    if (window_count == 0) return;
+
+    const offsets = [_]i32{ 3, 6, 9, 12, 9, 6, 3, 0 };
+    const move_flags = c.SWP_NOSIZE | c.SWP_NOZORDER | c.SWP_NOACTIVATE;
+    for (offsets) |offset| {
+        for (windows[0..window_count]) |window| {
+            if (c.IsWindow(window.hwnd) == 0) continue;
+            _ = c.SetWindowPos(window.hwnd, null, window.left, window.top + offset, 0, 0, move_flags);
+        }
+        if (offset != 0) c.Sleep(14);
+    }
 }
 
 fn captureSnapshotWindow(hwnd: c.HWND, lparam: c.LPARAM) callconv(.c) c.BOOL {
