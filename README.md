@@ -37,6 +37,12 @@ When Windows window snapping is enabled, the dialog also provides a warning and 
 
 ![Znap settings dialog](assets/settings_dialog.png)
 
+## Run on startup
+
+Select **Run on startup** from Znap's notification-area menu to toggle automatic launch when the current Windows user signs in. A check mark beside the menu item indicates that automatic launch is enabled. Selecting it again disables automatic launch. This setting applies only to the current user and does not require administrator privileges.
+
+![Znap notification-area menu](assets/tray_menu.png)
+
 ## Build
 
 Install Zig 0.16.0, then run:
@@ -45,12 +51,16 @@ Install Zig 0.16.0, then run:
 zig build -Doptimize=ReleaseSafe
 ```
 
-The executable is written to `zig-out/bin/Znap.exe`. No Go runtime or third-party Zig package is required.
+The executable is written to `zig-out/bin/Znap.exe`. No external dependencies are required.
 
 Run the unit tests with:
 
 ```powershell
 zig build test
+
+## Install / Start
+
+Save Znap.exe anywhere on your hard drive and run it (if you build from source you can just keep it in the projects zig-out folder).
 ```
 
 ## Implementation
