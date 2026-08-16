@@ -1,8 +1,12 @@
-# Znap (RectangleWin Zig port)
+<p align="center">
+  <img src="assets/znap_icon_readme.png" alt="Znap icon" width="360">
+</p>
 
-A dependency-free Zig 0.16 port of [ahmetb/RectangleWin](https://github.com/ahmetb/RectangleWin), a hotkey-oriented window snapping utility for Windows 10 and 11.
+# Znap
 
-## Hotkeys
+A dependency-free hotkey oriented window manager for Windows 10 & 11 inspired by Rectangle for MacOS, with additional window layout snapshot store/recall functionality. 
+
+## Default Hotkeys
 
 | Action | Shortcut |
 | --- | --- |
@@ -17,7 +21,7 @@ A dependency-free Zig 0.16 port of [ahmetb/RectangleWin](https://github.com/ahme
 | Cycle a centered, full-height window through 1/2, 2/3, and 1/3 width | `Win` + `Ctrl` + `Alt` + `\` |
 | Toggle maximize, restoring the previous state or a centered state if unknown | `Win` + `Ctrl` + `Alt` + `Enter` |
 | Toggle always-on-top | `Win` + `Ctrl` + `Alt` + `A` |
-| Store the fully visible ordinary windows in snapshot 1–9 or 0, ignoring always-on-top overlays | `Win` + `Shift` + `Alt` + `1`–`9` or `0` |
+| Store the currently fully visible windows and window focus in snapshot 1–9 or 0 (ignoring always-on-top overlays) | `Win` + `Shift` + `Alt` + `1`–`9` or `0` |
 | Recall snapshot 1–9 or 0, raise its windows, promote them in Alt+Tab, and restore focus | `Win` + `Ctrl` + `Alt` + `1`–`9` or `0` |
 
 The notification-area menu links to the original documentation, toggles launch at sign-in, and exits the application.
@@ -45,4 +49,5 @@ The application calls Win32 directly. Its C declarations are generated at build 
 
 ## License and attribution
 
-This is a clean Zig-language port of RectangleWin by Ahmet Alp Balkan. It preserves the upstream behavior and is distributed under the Apache License 2.0. See [LICENSE](LICENSE) and [NOTICE](NOTICE).
+The window snapping functionality is a Zig-language port of RectangleWin by Ahmet Alp Balkan. It preserves the upstream behavior and is distributed under the Apache License 2.0. See [LICENSE](LICENSE) and [NOTICE](NOTICE).
+
