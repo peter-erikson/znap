@@ -412,7 +412,7 @@ void ZnapShowSettingsDialog(HINSTANCE instance, HWND owner, const ZnapKeymapRow 
     if (show_snap_warning) {
         ZnapCreateSettingsControl(0, L"STATIC", L"", SS_ETCHEDHORZ, 24, 573, 950, 2, znap_settings_window, 0);
         ZnapCreateSettingsControl(0, L"STATIC", L"Windows snapping", SS_LEFT, 28, 581, 730, 18, znap_settings_window, 0);
-        ZnapCreateSettingsControl(0, L"STATIC", L"Znap is can have compatibility issues with Windows default window snapping functionality. It is recommended to disable window snapping from Windows settings for the best user experience.", SS_LEFT, 28, 602, 730, 38, znap_settings_window, 0);
+        ZnapCreateSettingsControl(0, L"STATIC", L"Znap can have compatibility issues with Windows default window snapping functionality. It is recommended to disable window snapping from Windows settings for the best user experience.", SS_LEFT, 28, 602, 730, 38, znap_settings_window, 0);
         ZnapCreateSettingsControl(0, L"BUTTON", L"Open Windows Settings", BS_PUSHBUTTON | WS_TABSTOP, 780, 595, 190, 30, znap_settings_window, ZNAP_OPEN_WINDOWS_SETTINGS);
         ZnapCreateSettingsControl(0, L"STATIC", L"", SS_ETCHEDHORZ, 24, 645, 950, 2, znap_settings_window, 0);
         ZnapCreateSettingsControl(0, L"BUTTON", L"Close", BS_DEFPUSHBUTTON | WS_TABSTOP, 830, 657, 140, 24, znap_settings_window, ZNAP_CLOSE_SETTINGS);

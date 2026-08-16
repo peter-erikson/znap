@@ -8,6 +8,6 @@ STYLE DS_SETFONT | DS_MODALFRAME | WS_POPUP | WS_CAPTION | WS_SYSMENU
 CAPTION "Znap"
 FONT 9, "Segoe UI"
 BEGIN
-    LTEXT "Znap is can have compatibility issues with Windows default window snapping functionality. It is recommended to disable window snapping from Windows settings for the best user experience.", -1, 12, 12, 266, 30
+    LTEXT "Znap can have compatibility issues with Windows default window snapping functionality. It is recommended to disable window snapping from Windows settings for the best user experience.", -1, 12, 12, 266, 30
     DEFPUSHBUTTON "Open Settings", 2001, 194, 60, 84, 16
 END
