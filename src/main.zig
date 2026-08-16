@@ -98,15 +98,12 @@ var keyboard_hook_ready: c.HANDLE = null;
 var keyboard_hook_thread_id: c.DWORD = 0;
 var suppressed_keys = [_]bool{false} ** 256;
 var tray_data: c.NOTIFYICONDATAW = std.mem.zeroes(c.NOTIFYICONDATAW);
-var last_resized: c.HWND = null;
-var edge_turns = [_]u2{0} ** 4;
-var corner_turns = [_]u2{0} ** 4;
-var center_turn: u2 = 0;
 var maximize_states: window_states.Store = .{};
 
 const snapshot_capacity = 64;
 const occluder_capacity = 1024;
 const snapshot_edge_overlap_tolerance: i32 = 2;
+const snapping_match_tolerance: i32 = 2;
 
 const SnapshotEntry = struct {
     hwnd: c.HWND,
@@ -376,7 +373,6 @@ fn recallSnapshot(snapshot_index: usize) void {
     const snapshot = &snapshots[snapshot_index];
     if (!snapshot.stored) return;
     const previous_focus = c.GetForegroundWindow();
-    resetCycles();
 
     for (snapshot.entries[0..snapshot.count]) |entry| {
         if (c.IsWindow(entry.hwnd) == 0 or !isZonableWindow(entry.hwnd)) continue;
@@ -471,49 +467,38 @@ const center_cycles = [3]geometry.Placement{ .center_half, .center_two_thirds, .
 fn cycleEdge(index: usize) void {
     const hwnd = c.GetForegroundWindow();
     if (hwnd == null) return;
-    if (hwnd != last_resized) edge_turns = [_]u2{0} ** 4;
-    if (resizeWindow(hwnd, edge_cycles[index][edge_turns[index]])) {
-        edge_turns[index] = @intCast((edge_turns[index] + 1) % 3);
-        center_turn = 0;
-        for (&edge_turns, 0..) |*turn, i| {
-            if (i != index) turn.* = 0;
-        }
-    }
+    const placement = nextWindowCyclePlacement(hwnd, &edge_cycles[index]);
+    _ = resizeWindow(hwnd, placement);
 }
 
 fn cycleCorner(index: usize) void {
     const hwnd = c.GetForegroundWindow();
     if (hwnd == null) return;
-    if (hwnd != last_resized) corner_turns = [_]u2{0} ** 4;
-    if (resizeWindow(hwnd, corner_cycles[index][corner_turns[index]])) {
-        corner_turns[index] = @intCast((corner_turns[index] + 1) % 3);
-        center_turn = 0;
-        for (&corner_turns, 0..) |*turn, i| {
-            if (i != index) turn.* = 0;
-        }
-    }
+    const placement = nextWindowCyclePlacement(hwnd, &corner_cycles[index]);
+    _ = resizeWindow(hwnd, placement);
+}
+
+fn nextWindowCyclePlacement(hwnd: c.HWND, cycle: *const [3]geometry.Placement) geometry.Placement {
+    const monitor = c.MonitorFromWindow(hwnd, c.MONITOR_DEFAULTTONEAREST);
+    if (monitor == null) return cycle[0];
+
+    var monitor_info: c.MONITORINFO = std.mem.zeroes(c.MONITORINFO);
+    monitor_info.cbSize = @sizeOf(c.MONITORINFO);
+    if (c.GetMonitorInfoW(monitor, &monitor_info) == 0) return cycle[0];
+
+    var bounds: c.RECT = undefined;
+    if (!getVisibleWindowBounds(hwnd, &bounds)) return cycle[0];
+    return geometry.nextCyclePlacement(cycle, fromWinRect(bounds), fromWinRect(monitor_info.rcWork), snapping_match_tolerance);
 }
 
 fn cycleCenter() void {
     const hwnd = c.GetForegroundWindow();
     if (hwnd == null) return;
-    if (hwnd != last_resized) center_turn = 0;
-    if (resizeWindow(hwnd, center_cycles[center_turn])) {
-        center_turn = @intCast((center_turn + 1) % 3);
-        edge_turns = [_]u2{0} ** 4;
-        corner_turns = [_]u2{0} ** 4;
-    }
-}
-
-fn resetCycles() void {
-    last_resized = null;
-    edge_turns = [_]u2{0} ** 4;
-    corner_turns = [_]u2{0} ** 4;
-    center_turn = 0;
+    const placement = nextWindowCyclePlacement(hwnd, &center_cycles);
+    _ = resizeWindow(hwnd, placement);
 }
 
 fn toggleMaximize(hwnd: c.HWND) void {
-    resetCycles();
     if (!isZonableWindow(hwnd)) return;
 
     const key = @intFromPtr(hwnd.?);
@@ -522,9 +507,7 @@ fn toggleMaximize(hwnd: c.HWND) void {
             _ = c.ShowWindow(hwnd, c.SW_RESTORE);
             const restored = c.SetWindowPos(hwnd, null, bounds.left, bounds.top, bounds.width(), bounds.height(), c.SWP_NOZORDER | c.SWP_NOACTIVATE) != 0;
             if (restored) maximize_states.remove(key);
-        } else if (resizeWindow(hwnd, .center_half)) {
-            center_turn = 1;
-        }
+        } else _ = resizeWindow(hwnd, .center_half);
         return;
     }
 
@@ -562,10 +545,7 @@ fn resizeWindow(hwnd: c.HWND, placement: geometry.Placement) bool {
     target.bottom += window_rect.bottom - frame.bottom;
 
     const ok = c.SetWindowPos(hwnd, null, target.left, target.top, target.width(), target.height(), c.SWP_NOZORDER | c.SWP_NOACTIVATE) != 0;
-    if (ok) {
-        last_resized = hwnd;
-        maximize_states.remove(@intFromPtr(hwnd.?));
-    }
+    if (ok) maximize_states.remove(@intFromPtr(hwnd.?));
     return ok;
 }
 

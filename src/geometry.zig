@@ -21,6 +21,17 @@ pub fn overlapsBeyondTolerance(a: Rect, b: Rect, tolerance: i32) bool {
     return overlap_width > tolerance and overlap_height > tolerance;
 }
 
+pub fn approximatelyEqual(a: Rect, b: Rect, tolerance: i32) bool {
+    return coordinateWithinTolerance(a.left, b.left, tolerance) and
+        coordinateWithinTolerance(a.top, b.top, tolerance) and
+        coordinateWithinTolerance(a.right, b.right, tolerance) and
+        coordinateWithinTolerance(a.bottom, b.bottom, tolerance);
+}
+
+fn coordinateWithinTolerance(a: i32, b: i32, tolerance: i32) bool {
+    return @abs(@as(i64, a) - @as(i64, b)) <= tolerance;
+}
+
 pub const Placement = enum {
     left_half,
     left_two_thirds,
@@ -111,6 +122,16 @@ pub fn place(placement: Placement, display: Rect, _: Rect) Rect {
     };
 }
 
+pub fn nextCyclePlacement(cycle: []const Placement, current: Rect, display: Rect, tolerance: i32) Placement {
+    std.debug.assert(cycle.len > 0);
+    for (cycle, 0..) |placement, index| {
+        if (approximatelyEqual(current, place(placement, display, current), tolerance)) {
+            return cycle[(index + 1) % cycle.len];
+        }
+    }
+    return cycle[0];
+}
+
 test "edge and corner placements preserve offset monitor coordinates" {
     const display: Rect = .{ .left = 100, .top = -900, .right = 2020, .bottom = 180 };
     try std.testing.expectEqual(Rect{ .left = 100, .top = -900, .right = 1060, .bottom = 180 }, place(.left_half, display, undefined));
@@ -132,4 +153,14 @@ test "overlap tolerance ignores thin edge and corner intersections" {
     try std.testing.expect(!overlapsBeyondTolerance(window, .{ .left = 97, .top = 98, .right = 150, .bottom = 150 }, 2));
     try std.testing.expect(overlapsBeyondTolerance(window, .{ .left = 97, .top = 97, .right = 150, .bottom = 150 }, 2));
     try std.testing.expect(!overlapsBeyondTolerance(window, .{ .left = 100, .top = 0, .right = 150, .bottom = 100 }, 2));
+}
+
+test "cycle continues from matching geometry and starts at half otherwise" {
+    const display: Rect = .{ .left = 0, .top = 0, .right = 1200, .bottom = 900 };
+    const cycle = [_]Placement{ .left_half, .left_two_thirds, .left_one_third };
+
+    try std.testing.expectEqual(.left_half, nextCyclePlacement(&cycle, .{ .left = 100, .top = 100, .right = 700, .bottom = 700 }, display, 2));
+    try std.testing.expectEqual(.left_two_thirds, nextCyclePlacement(&cycle, place(.left_half, display, undefined), display, 2));
+    try std.testing.expectEqual(.left_one_third, nextCyclePlacement(&cycle, .{ .left = 1, .top = -1, .right = 799, .bottom = 901 }, display, 2));
+    try std.testing.expectEqual(.left_half, nextCyclePlacement(&cycle, place(.left_one_third, display, undefined), display, 2));
 }
