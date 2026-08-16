@@ -13,3 +13,5 @@ void ZnapSwitchToThisWindow(HWND hwnd);
 HWND ZnapHwndTopmost(void);
 HWND ZnapHwndNotopmost(void);
 HKEY ZnapHkeyCurrentUser(void);
+BOOL ZnapMarkWindowsKeyUsed(void);
+void ZnapShowSnapWarning(HINSTANCE instance);

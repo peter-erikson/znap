@@ -12,10 +12,13 @@ const class_name = std.unicode.utf8ToUtf16LeStringLiteral("Znap.MessageWindow");
 const documentation_url = std.unicode.utf8ToUtf16LeStringLiteral("https://github.com/peter-erikson/znap");
 const startup_key = std.unicode.utf8ToUtf16LeStringLiteral("SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Run");
 const startup_value = std.unicode.utf8ToUtf16LeStringLiteral("Znap");
+const snap_settings_key = std.unicode.utf8ToUtf16LeStringLiteral("Control Panel\\Desktop");
+const snap_settings_value = std.unicode.utf8ToUtf16LeStringLiteral("WindowArrangementActive");
 const single_instance_mutex_name = std.unicode.utf8ToUtf16LeStringLiteral("Local\\Znap.SingleInstance");
 const already_running_message = std.unicode.utf8ToUtf16LeStringLiteral("Znap is already running.");
 
 const tray_message = c.WM_APP + 1;
+const hotkey_message = c.WM_APP + 2;
 const tray_id = 1;
 const menu_documentation = 1001;
 const menu_startup = 1002;
@@ -55,41 +58,45 @@ const mod_norepeat: u32 = 0x4000;
 const hotkeys = hotkeys: {
     @setEvalBranchQuota(20_000);
     break :hotkeys [_]Hotkey{
-        .{ .id = 1, .modifiers = mod_control | mod_alt | mod_win | mod_norepeat, .key = c.VK_LEFT, .action = .edge_left, .description = std.unicode.utf8ToUtf16LeStringLiteral("Win + Ctrl + Alt + Left") },
-        .{ .id = 2, .modifiers = mod_control | mod_alt | mod_win | mod_norepeat, .key = c.VK_RIGHT, .action = .edge_right, .description = std.unicode.utf8ToUtf16LeStringLiteral("Win + Ctrl + Alt + Right") },
-        .{ .id = 3, .modifiers = mod_control | mod_alt | mod_win | mod_norepeat, .key = c.VK_UP, .action = .edge_top, .description = std.unicode.utf8ToUtf16LeStringLiteral("Win + Ctrl + Alt + Up") },
-        .{ .id = 4, .modifiers = mod_control | mod_alt | mod_win | mod_norepeat, .key = c.VK_DOWN, .action = .edge_bottom, .description = std.unicode.utf8ToUtf16LeStringLiteral("Win + Ctrl + Alt + Down") },
-        .{ .id = 5, .modifiers = mod_control | mod_alt | mod_win | mod_norepeat, .key = c.VK_INSERT, .action = .corner_top_left, .description = std.unicode.utf8ToUtf16LeStringLiteral("Win + Ctrl + Alt + Insert") },
-        .{ .id = 6, .modifiers = mod_control | mod_alt | mod_win | mod_norepeat, .key = c.VK_DELETE, .action = .corner_bottom_left, .description = std.unicode.utf8ToUtf16LeStringLiteral("Win + Ctrl + Alt + Delete") },
-        .{ .id = 7, .modifiers = mod_control | mod_alt | mod_win | mod_norepeat, .key = c.VK_PRIOR, .action = .corner_top_right, .description = std.unicode.utf8ToUtf16LeStringLiteral("Win + Ctrl + Alt + Page Up") },
-        .{ .id = 8, .modifiers = mod_control | mod_alt | mod_win | mod_norepeat, .key = c.VK_NEXT, .action = .corner_bottom_right, .description = std.unicode.utf8ToUtf16LeStringLiteral("Win + Ctrl + Alt + Page Down") },
-        .{ .id = 50, .modifiers = mod_control | mod_alt | mod_win | mod_norepeat, .key = c.VK_RETURN, .action = .maximize, .description = std.unicode.utf8ToUtf16LeStringLiteral("Win + Ctrl + Alt + Enter") },
-        .{ .id = 60, .modifiers = mod_control | mod_alt | mod_win | mod_norepeat, .key = c.VK_OEM_5, .action = .center, .description = std.unicode.utf8ToUtf16LeStringLiteral("Win + Ctrl + Alt + \\") },
-        .{ .id = 70, .modifiers = mod_control | mod_alt | mod_win | mod_norepeat, .key = 'A', .action = .always_on_top, .description = std.unicode.utf8ToUtf16LeStringLiteral("Win + Ctrl + Alt + A") },
-        .{ .id = 80, .modifiers = mod_shift | mod_alt | mod_win | mod_norepeat, .key = '1', .action = .store_snapshot, .description = std.unicode.utf8ToUtf16LeStringLiteral("Win + Shift + Alt + 1"), .snapshot_index = 0 },
-        .{ .id = 81, .modifiers = mod_control | mod_alt | mod_win | mod_norepeat, .key = '1', .action = .recall_snapshot, .description = std.unicode.utf8ToUtf16LeStringLiteral("Win + Ctrl + Alt + 1"), .snapshot_index = 0 },
-        .{ .id = 82, .modifiers = mod_shift | mod_alt | mod_win | mod_norepeat, .key = '2', .action = .store_snapshot, .description = std.unicode.utf8ToUtf16LeStringLiteral("Win + Shift + Alt + 2"), .snapshot_index = 1 },
-        .{ .id = 83, .modifiers = mod_control | mod_alt | mod_win | mod_norepeat, .key = '2', .action = .recall_snapshot, .description = std.unicode.utf8ToUtf16LeStringLiteral("Win + Ctrl + Alt + 2"), .snapshot_index = 1 },
-        .{ .id = 84, .modifiers = mod_shift | mod_alt | mod_win | mod_norepeat, .key = '3', .action = .store_snapshot, .description = std.unicode.utf8ToUtf16LeStringLiteral("Win + Shift + Alt + 3"), .snapshot_index = 2 },
-        .{ .id = 85, .modifiers = mod_control | mod_alt | mod_win | mod_norepeat, .key = '3', .action = .recall_snapshot, .description = std.unicode.utf8ToUtf16LeStringLiteral("Win + Ctrl + Alt + 3"), .snapshot_index = 2 },
-        .{ .id = 86, .modifiers = mod_shift | mod_alt | mod_win | mod_norepeat, .key = '4', .action = .store_snapshot, .description = std.unicode.utf8ToUtf16LeStringLiteral("Win + Shift + Alt + 4"), .snapshot_index = 3 },
-        .{ .id = 87, .modifiers = mod_control | mod_alt | mod_win | mod_norepeat, .key = '4', .action = .recall_snapshot, .description = std.unicode.utf8ToUtf16LeStringLiteral("Win + Ctrl + Alt + 4"), .snapshot_index = 3 },
-        .{ .id = 88, .modifiers = mod_shift | mod_alt | mod_win | mod_norepeat, .key = '5', .action = .store_snapshot, .description = std.unicode.utf8ToUtf16LeStringLiteral("Win + Shift + Alt + 5"), .snapshot_index = 4 },
-        .{ .id = 89, .modifiers = mod_control | mod_alt | mod_win | mod_norepeat, .key = '5', .action = .recall_snapshot, .description = std.unicode.utf8ToUtf16LeStringLiteral("Win + Ctrl + Alt + 5"), .snapshot_index = 4 },
-        .{ .id = 90, .modifiers = mod_shift | mod_alt | mod_win | mod_norepeat, .key = '6', .action = .store_snapshot, .description = std.unicode.utf8ToUtf16LeStringLiteral("Win + Shift + Alt + 6"), .snapshot_index = 5 },
-        .{ .id = 91, .modifiers = mod_control | mod_alt | mod_win | mod_norepeat, .key = '6', .action = .recall_snapshot, .description = std.unicode.utf8ToUtf16LeStringLiteral("Win + Ctrl + Alt + 6"), .snapshot_index = 5 },
-        .{ .id = 92, .modifiers = mod_shift | mod_alt | mod_win | mod_norepeat, .key = '7', .action = .store_snapshot, .description = std.unicode.utf8ToUtf16LeStringLiteral("Win + Shift + Alt + 7"), .snapshot_index = 6 },
-        .{ .id = 93, .modifiers = mod_control | mod_alt | mod_win | mod_norepeat, .key = '7', .action = .recall_snapshot, .description = std.unicode.utf8ToUtf16LeStringLiteral("Win + Ctrl + Alt + 7"), .snapshot_index = 6 },
-        .{ .id = 94, .modifiers = mod_shift | mod_alt | mod_win | mod_norepeat, .key = '8', .action = .store_snapshot, .description = std.unicode.utf8ToUtf16LeStringLiteral("Win + Shift + Alt + 8"), .snapshot_index = 7 },
-        .{ .id = 95, .modifiers = mod_control | mod_alt | mod_win | mod_norepeat, .key = '8', .action = .recall_snapshot, .description = std.unicode.utf8ToUtf16LeStringLiteral("Win + Ctrl + Alt + 8"), .snapshot_index = 7 },
-        .{ .id = 96, .modifiers = mod_shift | mod_alt | mod_win | mod_norepeat, .key = '9', .action = .store_snapshot, .description = std.unicode.utf8ToUtf16LeStringLiteral("Win + Shift + Alt + 9"), .snapshot_index = 8 },
-        .{ .id = 97, .modifiers = mod_control | mod_alt | mod_win | mod_norepeat, .key = '9', .action = .recall_snapshot, .description = std.unicode.utf8ToUtf16LeStringLiteral("Win + Ctrl + Alt + 9"), .snapshot_index = 8 },
-        .{ .id = 98, .modifiers = mod_shift | mod_alt | mod_win | mod_norepeat, .key = '0', .action = .store_snapshot, .description = std.unicode.utf8ToUtf16LeStringLiteral("Win + Shift + Alt + 0"), .snapshot_index = 9 },
-        .{ .id = 99, .modifiers = mod_control | mod_alt | mod_win | mod_norepeat, .key = '0', .action = .recall_snapshot, .description = std.unicode.utf8ToUtf16LeStringLiteral("Win + Ctrl + Alt + 0"), .snapshot_index = 9 },
+        .{ .id = 1, .modifiers = mod_win | mod_norepeat, .key = c.VK_LEFT, .action = .edge_left, .description = std.unicode.utf8ToUtf16LeStringLiteral("Win + Left") },
+        .{ .id = 2, .modifiers = mod_win | mod_norepeat, .key = c.VK_RIGHT, .action = .edge_right, .description = std.unicode.utf8ToUtf16LeStringLiteral("Win + Right") },
+        .{ .id = 3, .modifiers = mod_win | mod_norepeat, .key = c.VK_UP, .action = .edge_top, .description = std.unicode.utf8ToUtf16LeStringLiteral("Win + Up") },
+        .{ .id = 4, .modifiers = mod_win | mod_norepeat, .key = c.VK_DOWN, .action = .edge_bottom, .description = std.unicode.utf8ToUtf16LeStringLiteral("Win + Down") },
+        .{ .id = 5, .modifiers = mod_win | mod_norepeat, .key = c.VK_INSERT, .action = .corner_top_left, .description = std.unicode.utf8ToUtf16LeStringLiteral("Win + Insert") },
+        .{ .id = 6, .modifiers = mod_win | mod_norepeat, .key = c.VK_DELETE, .action = .corner_bottom_left, .description = std.unicode.utf8ToUtf16LeStringLiteral("Win + Delete") },
+        .{ .id = 7, .modifiers = mod_win | mod_norepeat, .key = c.VK_PRIOR, .action = .corner_top_right, .description = std.unicode.utf8ToUtf16LeStringLiteral("Win + Page Up") },
+        .{ .id = 8, .modifiers = mod_win | mod_norepeat, .key = c.VK_NEXT, .action = .corner_bottom_right, .description = std.unicode.utf8ToUtf16LeStringLiteral("Win + Page Down") },
+        .{ .id = 50, .modifiers = mod_win | mod_norepeat, .key = c.VK_RETURN, .action = .maximize, .description = std.unicode.utf8ToUtf16LeStringLiteral("Win + Enter") },
+        .{ .id = 60, .modifiers = mod_win | mod_norepeat, .key = c.VK_OEM_5, .action = .center, .description = std.unicode.utf8ToUtf16LeStringLiteral("Win + \\") },
+        .{ .id = 70, .modifiers = mod_alt | mod_win | mod_norepeat, .key = 'A', .action = .always_on_top, .description = std.unicode.utf8ToUtf16LeStringLiteral("Win + Alt + A") },
+        .{ .id = 80, .modifiers = mod_alt | mod_win | mod_norepeat, .key = '1', .action = .store_snapshot, .description = std.unicode.utf8ToUtf16LeStringLiteral("Win + Alt + 1"), .snapshot_index = 0 },
+        .{ .id = 81, .modifiers = mod_win | mod_norepeat, .key = '1', .action = .recall_snapshot, .description = std.unicode.utf8ToUtf16LeStringLiteral("Win + 1"), .snapshot_index = 0 },
+        .{ .id = 82, .modifiers = mod_alt | mod_win | mod_norepeat, .key = '2', .action = .store_snapshot, .description = std.unicode.utf8ToUtf16LeStringLiteral("Win + Alt + 2"), .snapshot_index = 1 },
+        .{ .id = 83, .modifiers = mod_win | mod_norepeat, .key = '2', .action = .recall_snapshot, .description = std.unicode.utf8ToUtf16LeStringLiteral("Win + 2"), .snapshot_index = 1 },
+        .{ .id = 84, .modifiers = mod_alt | mod_win | mod_norepeat, .key = '3', .action = .store_snapshot, .description = std.unicode.utf8ToUtf16LeStringLiteral("Win + Alt + 3"), .snapshot_index = 2 },
+        .{ .id = 85, .modifiers = mod_win | mod_norepeat, .key = '3', .action = .recall_snapshot, .description = std.unicode.utf8ToUtf16LeStringLiteral("Win + 3"), .snapshot_index = 2 },
+        .{ .id = 86, .modifiers = mod_alt | mod_win | mod_norepeat, .key = '4', .action = .store_snapshot, .description = std.unicode.utf8ToUtf16LeStringLiteral("Win + Alt + 4"), .snapshot_index = 3 },
+        .{ .id = 87, .modifiers = mod_win | mod_norepeat, .key = '4', .action = .recall_snapshot, .description = std.unicode.utf8ToUtf16LeStringLiteral("Win + 4"), .snapshot_index = 3 },
+        .{ .id = 88, .modifiers = mod_alt | mod_win | mod_norepeat, .key = '5', .action = .store_snapshot, .description = std.unicode.utf8ToUtf16LeStringLiteral("Win + Alt + 5"), .snapshot_index = 4 },
+        .{ .id = 89, .modifiers = mod_win | mod_norepeat, .key = '5', .action = .recall_snapshot, .description = std.unicode.utf8ToUtf16LeStringLiteral("Win + 5"), .snapshot_index = 4 },
+        .{ .id = 90, .modifiers = mod_alt | mod_win | mod_norepeat, .key = '6', .action = .store_snapshot, .description = std.unicode.utf8ToUtf16LeStringLiteral("Win + Alt + 6"), .snapshot_index = 5 },
+        .{ .id = 91, .modifiers = mod_win | mod_norepeat, .key = '6', .action = .recall_snapshot, .description = std.unicode.utf8ToUtf16LeStringLiteral("Win + 6"), .snapshot_index = 5 },
+        .{ .id = 92, .modifiers = mod_alt | mod_win | mod_norepeat, .key = '7', .action = .store_snapshot, .description = std.unicode.utf8ToUtf16LeStringLiteral("Win + Alt + 7"), .snapshot_index = 6 },
+        .{ .id = 93, .modifiers = mod_win | mod_norepeat, .key = '7', .action = .recall_snapshot, .description = std.unicode.utf8ToUtf16LeStringLiteral("Win + 7"), .snapshot_index = 6 },
+        .{ .id = 94, .modifiers = mod_alt | mod_win | mod_norepeat, .key = '8', .action = .store_snapshot, .description = std.unicode.utf8ToUtf16LeStringLiteral("Win + Alt + 8"), .snapshot_index = 7 },
+        .{ .id = 95, .modifiers = mod_win | mod_norepeat, .key = '8', .action = .recall_snapshot, .description = std.unicode.utf8ToUtf16LeStringLiteral("Win + 8"), .snapshot_index = 7 },
+        .{ .id = 96, .modifiers = mod_alt | mod_win | mod_norepeat, .key = '9', .action = .store_snapshot, .description = std.unicode.utf8ToUtf16LeStringLiteral("Win + Alt + 9"), .snapshot_index = 8 },
+        .{ .id = 97, .modifiers = mod_win | mod_norepeat, .key = '9', .action = .recall_snapshot, .description = std.unicode.utf8ToUtf16LeStringLiteral("Win + 9"), .snapshot_index = 8 },
+        .{ .id = 98, .modifiers = mod_alt | mod_win | mod_norepeat, .key = '0', .action = .store_snapshot, .description = std.unicode.utf8ToUtf16LeStringLiteral("Win + Alt + 0"), .snapshot_index = 9 },
+        .{ .id = 99, .modifiers = mod_win | mod_norepeat, .key = '0', .action = .recall_snapshot, .description = std.unicode.utf8ToUtf16LeStringLiteral("Win + 0"), .snapshot_index = 9 },
     };
 };
 
 var message_window: c.HWND = null;
+var keyboard_hook: c.HHOOK = null;
+var keyboard_hook_ready: c.HANDLE = null;
+var keyboard_hook_thread_id: c.DWORD = 0;
+var suppressed_keys = [_]bool{false} ** 256;
 var tray_data: c.NOTIFYICONDATAW = std.mem.zeroes(c.NOTIFYICONDATAW);
 var last_resized: c.HWND = null;
 var edge_turns = [_]u2{0} ** 4;
@@ -142,6 +149,8 @@ pub fn main() !void {
     _ = c.SetProcessDpiAwarenessContext(c.ZnapPerMonitorV2());
 
     const instance = c.GetModuleHandleW(null);
+    if (windowsSnapEnabled()) c.ZnapShowSnapWarning(instance);
+
     var window_class: c.WNDCLASSEXW = std.mem.zeroes(c.WNDCLASSEXW);
     window_class.cbSize = @sizeOf(c.WNDCLASSEXW);
     window_class.lpfnWndProc = windowProc;
@@ -158,9 +167,19 @@ pub fn main() !void {
     };
     defer _ = c.Shell_NotifyIconW(c.NIM_DELETE, &tray_data);
 
-    registerHotkeys();
+    keyboard_hook_ready = c.CreateEventW(null, c.FALSE, c.FALSE, null);
+    if (keyboard_hook_ready == null) return error.CreateKeyboardHookEventFailed;
+    defer _ = c.CloseHandle(keyboard_hook_ready);
+
+    const keyboard_hook_thread = try std.Thread.spawn(.{}, keyboardHookThread, .{instance});
+    _ = c.WaitForSingleObject(keyboard_hook_ready, c.INFINITE);
+    if (keyboard_hook == null) {
+        keyboard_hook_thread.join();
+        return error.InstallKeyboardHookFailed;
+    }
     defer {
-        for (hotkeys) |hotkey| _ = c.UnregisterHotKey(message_window, hotkey.id);
+        _ = c.PostThreadMessageW(keyboard_hook_thread_id, c.WM_QUIT, 0, 0);
+        keyboard_hook_thread.join();
     }
 
     var message: c.MSG = undefined;
@@ -173,9 +192,23 @@ pub fn main() !void {
     }
 }
 
+fn windowsSnapEnabled() bool {
+    var key: c.HKEY = null;
+    if (c.RegOpenKeyExW(c.ZnapHkeyCurrentUser(), snap_settings_key, 0, c.KEY_QUERY_VALUE, &key) != c.ERROR_SUCCESS) return false;
+    defer _ = c.RegCloseKey(key);
+
+    var value_type: c.DWORD = 0;
+    var value: [2]u16 = .{ 0, 0 };
+    var byte_count: c.DWORD = @sizeOf(@TypeOf(value));
+    const result = c.RegQueryValueExW(key, snap_settings_value, null, &value_type, @ptrCast(&value), &byte_count);
+    if (result == c.ERROR_FILE_NOT_FOUND) return true;
+    if (result != c.ERROR_SUCCESS) return false;
+    return value_type == c.REG_SZ and byte_count >= @sizeOf(u16) and value[0] == '1';
+}
+
 fn windowProc(hwnd: c.HWND, message: c.UINT, wparam: c.WPARAM, lparam: c.LPARAM) callconv(.c) c.LRESULT {
     switch (message) {
-        c.WM_HOTKEY => handleHotkey(@intCast(wparam)),
+        hotkey_message => handleHotkey(@intCast(wparam)),
         tray_message => handleTrayMessage(hwnd, lparam),
         c.WM_DESTROY => c.PostQuitMessage(0),
         else => return c.DefWindowProcW(hwnd, message, wparam, lparam),
@@ -183,34 +216,58 @@ fn windowProc(hwnd: c.HWND, message: c.UINT, wparam: c.WPARAM, lparam: c.LPARAM)
     return 0;
 }
 
-fn registerHotkeys() void {
-    var failed: [hotkeys.len]Hotkey = undefined;
-    var failed_count: usize = 0;
-    for (hotkeys) |hotkey| {
-        if (c.RegisterHotKey(message_window, hotkey.id, hotkey.modifiers, hotkey.key) == 0) {
-            failed[failed_count] = hotkey;
-            failed_count += 1;
-        }
-    }
-    if (failed_count == 0) return;
+fn keyboardHookThread(instance: c.HINSTANCE) void {
+    keyboard_hook_thread_id = c.GetCurrentThreadId();
 
-    var text: [2048]u16 = [_]u16{0} ** 2048;
-    const heading = std.unicode.utf8ToUtf16LeStringLiteral("These hotkeys are already in use and could not be registered:\r\n\r\n");
-    var used: usize = 0;
-    appendUtf16(&text, &used, heading);
-    for (failed[0..failed_count]) |hotkey| {
-        appendUtf16(&text, &used, std.unicode.utf8ToUtf16LeStringLiteral("  - "));
-        appendUtf16(&text, &used, std.mem.span(hotkey.description));
-        appendUtf16(&text, &used, std.unicode.utf8ToUtf16LeStringLiteral("\r\n"));
-    }
-    _ = c.MessageBoxW(message_window, &text, app_name, c.MB_OK | c.MB_ICONWARNING);
+    // A thread message queue must exist before the main thread can stop this
+    // hook with PostThreadMessageW.
+    var message: c.MSG = undefined;
+    _ = c.PeekMessageW(&message, null, 0, 0, c.PM_NOREMOVE);
+
+    keyboard_hook = c.SetWindowsHookExW(c.WH_KEYBOARD_LL, keyboardProc, instance, 0);
+    _ = c.SetEvent(keyboard_hook_ready);
+    if (keyboard_hook == null) return;
+    defer _ = c.UnhookWindowsHookEx(keyboard_hook);
+
+    while (c.GetMessageW(&message, null, 0, 0) > 0) {}
 }
 
-fn appendUtf16(buffer: []u16, used: *usize, value: []const u16) void {
-    const amount = @min(value.len, buffer.len - used.* - 1);
-    @memcpy(buffer[used.*..][0..amount], value[0..amount]);
-    used.* += amount;
-    buffer[used.*] = 0;
+fn keyboardProc(code: c_int, wparam: c.WPARAM, lparam: c.LPARAM) callconv(.c) c.LRESULT {
+    if (code == c.HC_ACTION) {
+        const event: *const c.KBDLLHOOKSTRUCT = @ptrFromInt(@as(usize, @bitCast(lparam)));
+        if (event.vkCode < suppressed_keys.len) {
+            const key_index: usize = @intCast(event.vkCode);
+            const is_key_down = wparam == c.WM_KEYDOWN or wparam == c.WM_SYSKEYDOWN;
+            const is_key_up = wparam == c.WM_KEYUP or wparam == c.WM_SYSKEYUP;
+
+            if (is_key_up and suppressed_keys[key_index]) {
+                suppressed_keys[key_index] = false;
+                return 1;
+            }
+
+            if (is_key_down) {
+                for (hotkeys) |hotkey| {
+                    if (event.vkCode != hotkey.key or currentModifiers() != hotkey.modifiers & ~mod_norepeat) continue;
+                    if (!suppressed_keys[key_index]) {
+                        suppressed_keys[key_index] = true;
+                        if (hotkey.modifiers & ~mod_norepeat == mod_win) _ = c.ZnapMarkWindowsKeyUsed();
+                        _ = c.PostMessageW(message_window, hotkey_message, @intCast(hotkey.id), 0);
+                    }
+                    return 1;
+                }
+            }
+        }
+    }
+    return c.CallNextHookEx(keyboard_hook, code, wparam, lparam);
+}
+
+fn currentModifiers() u32 {
+    var modifiers: u32 = 0;
+    if (c.GetAsyncKeyState(c.VK_CONTROL) < 0) modifiers |= mod_control;
+    if (c.GetAsyncKeyState(c.VK_MENU) < 0) modifiers |= mod_alt;
+    if (c.GetAsyncKeyState(c.VK_SHIFT) < 0) modifiers |= mod_shift;
+    if (c.GetAsyncKeyState(c.VK_LWIN) < 0 or c.GetAsyncKeyState(c.VK_RWIN) < 0) modifiers |= mod_win;
+    return modifiers;
 }
 
 fn handleHotkey(id: i32) void {
