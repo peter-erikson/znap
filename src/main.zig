@@ -1,6 +1,7 @@
 const std = @import("std");
 const c = @import("win32");
 const geometry = @import("geometry.zig");
+const settings = @import("settings.zig");
 const window_states = @import("window_states.zig");
 
 comptime {
@@ -21,76 +22,14 @@ const tray_message = c.WM_APP + 1;
 const hotkey_message = c.WM_APP + 2;
 const tray_id = 1;
 const menu_documentation = 1001;
-const menu_startup = 1002;
-const menu_quit = 1003;
-
-const HotkeyAction = enum {
-    edge_left,
-    edge_right,
-    edge_top,
-    edge_bottom,
-    corner_top_left,
-    corner_top_right,
-    corner_bottom_left,
-    corner_bottom_right,
-    maximize,
-    center,
-    always_on_top,
-    store_snapshot,
-    recall_snapshot,
-};
-
-const Hotkey = struct {
-    id: i32,
-    modifiers: u32,
-    key: u32,
-    action: HotkeyAction,
-    description: [*:0]const u16,
-    snapshot_index: u4 = 0,
-};
+const menu_settings = 1002;
+const menu_startup = 1003;
+const menu_quit = 1004;
 
 const mod_alt: u32 = 0x0001;
 const mod_control: u32 = 0x0002;
 const mod_shift: u32 = 0x0004;
 const mod_win: u32 = 0x0008;
-const mod_norepeat: u32 = 0x4000;
-
-const hotkeys = hotkeys: {
-    @setEvalBranchQuota(20_000);
-    break :hotkeys [_]Hotkey{
-        .{ .id = 1, .modifiers = mod_win | mod_norepeat, .key = c.VK_LEFT, .action = .edge_left, .description = std.unicode.utf8ToUtf16LeStringLiteral("Win + Left") },
-        .{ .id = 2, .modifiers = mod_win | mod_norepeat, .key = c.VK_RIGHT, .action = .edge_right, .description = std.unicode.utf8ToUtf16LeStringLiteral("Win + Right") },
-        .{ .id = 3, .modifiers = mod_win | mod_norepeat, .key = c.VK_UP, .action = .edge_top, .description = std.unicode.utf8ToUtf16LeStringLiteral("Win + Up") },
-        .{ .id = 4, .modifiers = mod_win | mod_norepeat, .key = c.VK_DOWN, .action = .edge_bottom, .description = std.unicode.utf8ToUtf16LeStringLiteral("Win + Down") },
-        .{ .id = 5, .modifiers = mod_win | mod_norepeat, .key = c.VK_INSERT, .action = .corner_top_left, .description = std.unicode.utf8ToUtf16LeStringLiteral("Win + Insert") },
-        .{ .id = 6, .modifiers = mod_win | mod_norepeat, .key = c.VK_DELETE, .action = .corner_bottom_left, .description = std.unicode.utf8ToUtf16LeStringLiteral("Win + Delete") },
-        .{ .id = 7, .modifiers = mod_win | mod_norepeat, .key = c.VK_PRIOR, .action = .corner_top_right, .description = std.unicode.utf8ToUtf16LeStringLiteral("Win + Page Up") },
-        .{ .id = 8, .modifiers = mod_win | mod_norepeat, .key = c.VK_NEXT, .action = .corner_bottom_right, .description = std.unicode.utf8ToUtf16LeStringLiteral("Win + Page Down") },
-        .{ .id = 50, .modifiers = mod_win | mod_norepeat, .key = c.VK_RETURN, .action = .maximize, .description = std.unicode.utf8ToUtf16LeStringLiteral("Win + Enter") },
-        .{ .id = 60, .modifiers = mod_win | mod_norepeat, .key = c.VK_OEM_5, .action = .center, .description = std.unicode.utf8ToUtf16LeStringLiteral("Win + \\") },
-        .{ .id = 70, .modifiers = mod_alt | mod_win | mod_norepeat, .key = 'A', .action = .always_on_top, .description = std.unicode.utf8ToUtf16LeStringLiteral("Win + Alt + A") },
-        .{ .id = 80, .modifiers = mod_alt | mod_win | mod_norepeat, .key = '1', .action = .store_snapshot, .description = std.unicode.utf8ToUtf16LeStringLiteral("Win + Alt + 1"), .snapshot_index = 0 },
-        .{ .id = 81, .modifiers = mod_win | mod_norepeat, .key = '1', .action = .recall_snapshot, .description = std.unicode.utf8ToUtf16LeStringLiteral("Win + 1"), .snapshot_index = 0 },
-        .{ .id = 82, .modifiers = mod_alt | mod_win | mod_norepeat, .key = '2', .action = .store_snapshot, .description = std.unicode.utf8ToUtf16LeStringLiteral("Win + Alt + 2"), .snapshot_index = 1 },
-        .{ .id = 83, .modifiers = mod_win | mod_norepeat, .key = '2', .action = .recall_snapshot, .description = std.unicode.utf8ToUtf16LeStringLiteral("Win + 2"), .snapshot_index = 1 },
-        .{ .id = 84, .modifiers = mod_alt | mod_win | mod_norepeat, .key = '3', .action = .store_snapshot, .description = std.unicode.utf8ToUtf16LeStringLiteral("Win + Alt + 3"), .snapshot_index = 2 },
-        .{ .id = 85, .modifiers = mod_win | mod_norepeat, .key = '3', .action = .recall_snapshot, .description = std.unicode.utf8ToUtf16LeStringLiteral("Win + 3"), .snapshot_index = 2 },
-        .{ .id = 86, .modifiers = mod_alt | mod_win | mod_norepeat, .key = '4', .action = .store_snapshot, .description = std.unicode.utf8ToUtf16LeStringLiteral("Win + Alt + 4"), .snapshot_index = 3 },
-        .{ .id = 87, .modifiers = mod_win | mod_norepeat, .key = '4', .action = .recall_snapshot, .description = std.unicode.utf8ToUtf16LeStringLiteral("Win + 4"), .snapshot_index = 3 },
-        .{ .id = 88, .modifiers = mod_alt | mod_win | mod_norepeat, .key = '5', .action = .store_snapshot, .description = std.unicode.utf8ToUtf16LeStringLiteral("Win + Alt + 5"), .snapshot_index = 4 },
-        .{ .id = 89, .modifiers = mod_win | mod_norepeat, .key = '5', .action = .recall_snapshot, .description = std.unicode.utf8ToUtf16LeStringLiteral("Win + 5"), .snapshot_index = 4 },
-        .{ .id = 90, .modifiers = mod_alt | mod_win | mod_norepeat, .key = '6', .action = .store_snapshot, .description = std.unicode.utf8ToUtf16LeStringLiteral("Win + Alt + 6"), .snapshot_index = 5 },
-        .{ .id = 91, .modifiers = mod_win | mod_norepeat, .key = '6', .action = .recall_snapshot, .description = std.unicode.utf8ToUtf16LeStringLiteral("Win + 6"), .snapshot_index = 5 },
-        .{ .id = 92, .modifiers = mod_alt | mod_win | mod_norepeat, .key = '7', .action = .store_snapshot, .description = std.unicode.utf8ToUtf16LeStringLiteral("Win + Alt + 7"), .snapshot_index = 6 },
-        .{ .id = 93, .modifiers = mod_win | mod_norepeat, .key = '7', .action = .recall_snapshot, .description = std.unicode.utf8ToUtf16LeStringLiteral("Win + 7"), .snapshot_index = 6 },
-        .{ .id = 94, .modifiers = mod_alt | mod_win | mod_norepeat, .key = '8', .action = .store_snapshot, .description = std.unicode.utf8ToUtf16LeStringLiteral("Win + Alt + 8"), .snapshot_index = 7 },
-        .{ .id = 95, .modifiers = mod_win | mod_norepeat, .key = '8', .action = .recall_snapshot, .description = std.unicode.utf8ToUtf16LeStringLiteral("Win + 8"), .snapshot_index = 7 },
-        .{ .id = 96, .modifiers = mod_alt | mod_win | mod_norepeat, .key = '9', .action = .store_snapshot, .description = std.unicode.utf8ToUtf16LeStringLiteral("Win + Alt + 9"), .snapshot_index = 8 },
-        .{ .id = 97, .modifiers = mod_win | mod_norepeat, .key = '9', .action = .recall_snapshot, .description = std.unicode.utf8ToUtf16LeStringLiteral("Win + 9"), .snapshot_index = 8 },
-        .{ .id = 98, .modifiers = mod_alt | mod_win | mod_norepeat, .key = '0', .action = .store_snapshot, .description = std.unicode.utf8ToUtf16LeStringLiteral("Win + Alt + 0"), .snapshot_index = 9 },
-        .{ .id = 99, .modifiers = mod_win | mod_norepeat, .key = '0', .action = .recall_snapshot, .description = std.unicode.utf8ToUtf16LeStringLiteral("Win + 0"), .snapshot_index = 9 },
-    };
-};
 
 var message_window: c.HWND = null;
 var keyboard_hook: c.HHOOK = null;
@@ -99,6 +38,8 @@ var keyboard_hook_thread_id: c.DWORD = 0;
 var suppressed_keys = [_]bool{false} ** 256;
 var tray_data: c.NOTIFYICONDATAW = std.mem.zeroes(c.NOTIFYICONDATAW);
 var maximize_states: window_states.Store = .{};
+var hotkeys: []const settings.LoadedKeymap = &.{};
+var settings_file_path: ?[:0]const u16 = null;
 
 const snapshot_capacity = 64;
 const occluder_capacity = 1024;
@@ -133,7 +74,7 @@ const AnimationWindow = struct {
 
 var snapshots = [_]WindowSnapshot{.{}} ** 10;
 
-pub fn main() !void {
+pub fn main(init: std.process.Init) !void {
     const single_instance_mutex = c.CreateMutexW(null, c.TRUE, single_instance_mutex_name);
     if (single_instance_mutex == null) return error.CreateSingleInstanceMutexFailed;
     defer _ = c.CloseHandle(single_instance_mutex);
@@ -144,6 +85,13 @@ pub fn main() !void {
     }
 
     _ = c.SetProcessDpiAwarenessContext(c.ZnapPerMonitorV2());
+
+    const loaded_settings = settings.load(init.io, init.arena.allocator(), init.environ_map) catch |err| {
+        std.log.err("failed to load settings: {s}", .{@errorName(err)});
+        return err;
+    };
+    hotkeys = loaded_settings.keymaps;
+    settings_file_path = try std.unicode.utf8ToUtf16LeAllocZ(init.arena.allocator(), loaded_settings.path);
 
     const instance = c.GetModuleHandleW(null);
     if (windowsSnapEnabled()) c.ZnapShowSnapWarning(instance);
@@ -243,12 +191,12 @@ fn keyboardProc(code: c_int, wparam: c.WPARAM, lparam: c.LPARAM) callconv(.c) c.
             }
 
             if (is_key_down) {
-                for (hotkeys) |hotkey| {
-                    if (event.vkCode != hotkey.key or currentModifiers() != hotkey.modifiers & ~mod_norepeat) continue;
+                for (hotkeys, 0..) |hotkey, hotkey_index| {
+                    if (event.vkCode != hotkey.key or currentModifiers() != hotkey.modifiers) continue;
                     if (!suppressed_keys[key_index]) {
                         suppressed_keys[key_index] = true;
-                        if (hotkey.modifiers & ~mod_norepeat == mod_win) _ = c.ZnapMarkWindowsKeyUsed();
-                        _ = c.PostMessageW(message_window, hotkey_message, @intCast(hotkey.id), 0);
+                        if (hotkey.modifiers == mod_win) _ = c.ZnapMarkWindowsKeyUsed();
+                        _ = c.PostMessageW(message_window, hotkey_message, hotkey_index, 0);
                     }
                     return 1;
                 }
@@ -268,24 +216,22 @@ fn currentModifiers() u32 {
 }
 
 fn handleHotkey(id: i32) void {
-    for (hotkeys) |hotkey| {
-        if (hotkey.id != id) continue;
-        switch (hotkey.action) {
-            .edge_left => cycleEdge(0),
-            .edge_right => cycleEdge(1),
-            .edge_top => cycleEdge(2),
-            .edge_bottom => cycleEdge(3),
-            .corner_top_left => cycleCorner(0),
-            .corner_top_right => cycleCorner(1),
-            .corner_bottom_left => cycleCorner(2),
-            .corner_bottom_right => cycleCorner(3),
-            .maximize => toggleMaximize(c.GetForegroundWindow()),
-            .center => cycleCenter(),
-            .always_on_top => toggleAlwaysOnTop(c.GetForegroundWindow()),
-            .store_snapshot => storeSnapshot(hotkey.snapshot_index),
-            .recall_snapshot => recallSnapshot(hotkey.snapshot_index),
-        }
-        return;
+    if (id < 0 or id >= hotkeys.len) return;
+    const hotkey = hotkeys[@intCast(id)];
+    switch (hotkey.action) {
+        .edge_left => cycleEdge(0),
+        .edge_right => cycleEdge(1),
+        .edge_top => cycleEdge(2),
+        .edge_bottom => cycleEdge(3),
+        .corner_top_left => cycleCorner(0),
+        .corner_top_right => cycleCorner(1),
+        .corner_bottom_left => cycleCorner(2),
+        .corner_bottom_right => cycleCorner(3),
+        .maximize => toggleMaximize(c.GetForegroundWindow()),
+        .center => cycleCenter(),
+        .always_on_top => toggleAlwaysOnTop(c.GetForegroundWindow()),
+        .store_snapshot => storeSnapshot(hotkey.snapshot_index),
+        .recall_snapshot => recallSnapshot(hotkey.snapshot_index),
     }
 }
 
@@ -629,6 +575,7 @@ fn showTrayMenu(hwnd: c.HWND) void {
     const menu = c.CreatePopupMenu() orelse return;
     defer _ = c.DestroyMenu(menu);
     _ = c.AppendMenuW(menu, c.MF_STRING, menu_documentation, std.unicode.utf8ToUtf16LeStringLiteral("Documentation"));
+    _ = c.AppendMenuW(menu, c.MF_STRING, menu_settings, std.unicode.utf8ToUtf16LeStringLiteral("Settings"));
     _ = c.AppendMenuW(menu, c.MF_SEPARATOR, 0, null);
     const startup_flags: c.UINT = if (autoRunEnabled()) 0x00000008 else 0;
     _ = c.AppendMenuW(menu, startup_flags, menu_startup, std.unicode.utf8ToUtf16LeStringLiteral("Run on startup"));
@@ -641,6 +588,9 @@ fn showTrayMenu(hwnd: c.HWND) void {
     const command = c.TrackPopupMenu(menu, c.TPM_RETURNCMD | c.TPM_NONOTIFY | c.TPM_RIGHTBUTTON, point.x, point.y, 0, hwnd, null);
     switch (command) {
         menu_documentation => _ = c.ShellExecuteW(hwnd, std.unicode.utf8ToUtf16LeStringLiteral("open"), documentation_url, null, null, c.SW_SHOWNORMAL),
+        menu_settings => if (settings_file_path) |path| {
+            _ = c.ShellExecuteW(hwnd, std.unicode.utf8ToUtf16LeStringLiteral("open"), path.ptr, null, null, c.SW_SHOWNORMAL);
+        },
         menu_startup => if (autoRunEnabled()) disableAutoRun() else enableAutoRun(),
         menu_quit => _ = c.DestroyWindow(hwnd),
         else => {},

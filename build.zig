@@ -46,7 +46,16 @@ pub fn build(b: *std.Build) void {
         }),
     });
     const run_window_state_tests = b.addRunArtifact(window_state_tests);
+    const settings_tests = b.addTest(.{
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("src/settings.zig"),
+            .target = target,
+            .optimize = optimize,
+        }),
+    });
+    const run_settings_tests = b.addRunArtifact(settings_tests);
     const test_step = b.step("test", "Run unit tests");
     test_step.dependOn(&run_geometry_tests.step);
     test_step.dependOn(&run_window_state_tests.step);
+    test_step.dependOn(&run_settings_tests.step);
 }
