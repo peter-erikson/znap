@@ -212,7 +212,19 @@ pub fn save(
     try atomic.replace(io);
 }
 
+pub fn updateKeymap(keymaps: []LoadedKeymap, index: usize, modifiers: u32, key: u32) void {
+    for (keymaps, 0..) |*keymap, other_index| {
+        if (key != 0 and other_index != index and keymap.key == key and keymap.modifiers == modifiers) {
+            keymap.modifiers = 0;
+            keymap.key = 0;
+        }
+    }
+    keymaps[index].modifiers = modifiers;
+    keymaps[index].key = key;
+}
+
 fn keyName(key: u32, buffer: *[16]u8) []const u8 {
+    if (key == 0) return "none";
     if (key <= std.math.maxInt(u8)) {
         const byte: u8 = @intCast(key);
         if (std.ascii.isDigit(byte) or std.ascii.isUpper(byte)) {
@@ -239,6 +251,7 @@ fn keyName(key: u32, buffer: *[16]u8) []const u8 {
 }
 
 fn keyCode(name: []const u8) !u32 {
+    if (std.ascii.eqlIgnoreCase(name, "none")) return 0;
     if (name.len == 1) {
         const key = std.ascii.toUpper(name[0]);
         if (std.ascii.isAlphanumeric(key)) return key;
@@ -302,4 +315,17 @@ test "arbitrary virtual keys round trip through key names" {
     const name = keyName(0x70, &buffer);
     try std.testing.expectEqualStrings("vk_70", name);
     try std.testing.expectEqual(@as(u32, 0x70), try keyCode(name));
+}
+
+test "updating a keymap clears duplicate shortcuts" {
+    var keymaps = [_]LoadedKeymap{
+        .{ .modifiers = mod_win, .key = 'A', .action = .edge_left, .snapshot_index = 0 },
+        .{ .modifiers = mod_alt, .key = 'B', .action = .edge_right, .snapshot_index = 0 },
+        .{ .modifiers = mod_win, .key = 'A', .action = .edge_top, .snapshot_index = 0 },
+    };
+    updateKeymap(&keymaps, 1, mod_win, 'A');
+    try std.testing.expectEqual(@as(u32, 0), keymaps[0].key);
+    try std.testing.expectEqual(@as(u32, 0), keymaps[2].key);
+    try std.testing.expectEqual(@as(u32, mod_win), keymaps[1].modifiers);
+    try std.testing.expectEqual(@as(u32, 'A'), keymaps[1].key);
 }

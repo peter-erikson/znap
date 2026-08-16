@@ -85,7 +85,8 @@ void ZnapShowSnapWarning(HINSTANCE instance) {
 #define ZNAP_CAPTURE_KEYMAP (WM_APP + 20)
 #define ZNAP_TOOLTIP_TIMER 1
 #define ZNAP_SETTINGS_WIDTH 1010
-#define ZNAP_SETTINGS_HEIGHT 720
+#define ZNAP_SETTINGS_HEIGHT_WITH_SNAP 744
+#define ZNAP_SETTINGS_HEIGHT_SHORTCUTS_ONLY 671
 
 typedef struct ZnapSettingsRowState {
     HWND edit;
@@ -96,6 +97,7 @@ typedef struct ZnapSettingsRowState {
 } ZnapSettingsRowState;
 
 static HWND znap_settings_window = NULL;
+static int znap_settings_height = ZNAP_SETTINGS_HEIGHT_WITH_SNAP;
 static ZnapSettingsRowState znap_settings_rows[ZNAP_MAX_KEYMAPS];
 static UINT znap_settings_row_count = 0;
 static LONG znap_recording_row = -1;
@@ -105,7 +107,7 @@ static HWND znap_settings_tooltip = NULL;
 static LONG znap_active_tooltip_row = -1;
 static LONG znap_hover_tooltip_row = -1;
 static DWORD znap_tooltip_hover_started = 0;
-static WCHAR znap_collision_tooltip[] = L"The keyboard shortcut is overriding a global system shortcut, this can have unforeseen consequences.";
+static WCHAR znap_collision_tooltip[] = L"The keyboard shortcut is overriding a global system shortcut, this usually works fine but can have unforeseen consequences.";
 
 static void ZnapDeactivateCollisionTooltip(UINT row) {
     if (znap_settings_tooltip == NULL) return;
@@ -175,6 +177,7 @@ static void ZnapAppendText(WCHAR *buffer, size_t capacity, const WCHAR *text) {
 
 static void ZnapFormatKeymap(UINT modifiers, UINT key, WCHAR *buffer, size_t capacity) {
     buffer[0] = L'\0';
+    if (key == 0) return;
     if (modifiers & MOD_WIN) ZnapAppendText(buffer, capacity, L"Win + ");
     if (modifiers & MOD_CONTROL) ZnapAppendText(buffer, capacity, L"Ctrl + ");
     if (modifiers & MOD_ALT) ZnapAppendText(buffer, capacity, L"Alt + ");
@@ -195,6 +198,7 @@ static void ZnapFormatKeymap(UINT modifiers, UINT key, WCHAR *buffer, size_t cap
 }
 
 static BOOL ZnapKeymapCollides(HWND window, UINT row, UINT modifiers, UINT key) {
+    if (key == 0) return FALSE;
     const int hotkey_id = 0x6000 + (int)row;
     if (!RegisterHotKey(window, hotkey_id, modifiers | MOD_NOREPEAT, key)) return TRUE;
     UnregisterHotKey(window, hotkey_id);
@@ -291,9 +295,9 @@ static LRESULT CALLBACK ZnapSettingsProc(HWND window, UINT message, WPARAM wpara
         case WM_GETMINMAXINFO: {
             MINMAXINFO *limits = (MINMAXINFO *)lparam;
             limits->ptMinTrackSize.x = ZNAP_SETTINGS_WIDTH;
-            limits->ptMinTrackSize.y = ZNAP_SETTINGS_HEIGHT;
+            limits->ptMinTrackSize.y = znap_settings_height;
             limits->ptMaxTrackSize.x = ZNAP_SETTINGS_WIDTH;
-            limits->ptMaxTrackSize.y = ZNAP_SETTINGS_HEIGHT;
+            limits->ptMaxTrackSize.y = znap_settings_height;
             return 0;
         }
         case ZNAP_CAPTURE_KEYMAP: {
@@ -303,6 +307,14 @@ static LRESULT CALLBACK ZnapSettingsProc(HWND window, UINT message, WPARAM wpara
             if (!ZnapUpdateKeymap(state->index, (UINT)wparam, (UINT)lparam)) {
                 MessageBoxW(window, L"The keymap could not be saved. The previous keymap is still active.", L"Znap Settings", MB_OK | MB_ICONERROR);
                 return 0;
+            }
+            for (UINT other_row = 0; lparam != 0 && other_row < znap_settings_row_count; other_row++) {
+                ZnapSettingsRowState *other = &znap_settings_rows[other_row];
+                if (other_row != (UINT)row && other->modifiers == (UINT)wparam && other->key == (UINT)lparam) {
+                    other->modifiers = 0;
+                    other->key = 0;
+                    ZnapRefreshSettingsRow(other_row);
+                }
             }
             state->modifiers = (UINT)wparam;
             state->key = (UINT)lparam;
@@ -353,12 +365,13 @@ void ZnapShowSettingsDialog(HINSTANCE instance, HWND owner, const ZnapKeymapRow 
         return;
     }
     if (row_count > ZNAP_MAX_KEYMAPS) row_count = ZNAP_MAX_KEYMAPS;
+    znap_settings_height = show_snap_warning ? ZNAP_SETTINGS_HEIGHT_WITH_SNAP : ZNAP_SETTINGS_HEIGHT_SHORTCUTS_ONLY;
     ZnapEnsureSettingsClass(instance);
     znap_settings_font = (HFONT)GetStockObject(DEFAULT_GUI_FONT);
     znap_warning_font = CreateFontW(-20, 0, 0, 0, FW_BOLD, FALSE, FALSE, FALSE, DEFAULT_CHARSET,
         OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY, DEFAULT_PITCH | FF_DONTCARE, L"Segoe UI Symbol");
-    znap_settings_window = CreateWindowExW(WS_EX_DLGMODALFRAME, ZNAP_SETTINGS_CLASS, L"Settings", WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX,
-        CW_USEDEFAULT, CW_USEDEFAULT, ZNAP_SETTINGS_WIDTH, ZNAP_SETTINGS_HEIGHT, owner, NULL, instance, NULL);
+    znap_settings_window = CreateWindowExW(WS_EX_DLGMODALFRAME, ZNAP_SETTINGS_CLASS, L"Settings", WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU,
+        CW_USEDEFAULT, CW_USEDEFAULT, ZNAP_SETTINGS_WIDTH, znap_settings_height, owner, NULL, instance, NULL);
     if (znap_settings_window == NULL) return;
     znap_settings_row_count = row_count;
     znap_settings_tooltip = CreateWindowExW(WS_EX_TOPMOST | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE, L"STATIC", znap_collision_tooltip,
@@ -375,7 +388,7 @@ void ZnapShowSettingsDialog(HINSTANCE instance, HWND owner, const ZnapKeymapRow 
     for (UINT row = 0; row < row_count; row++) {
         const BOOL general = row < general_count;
         const int x = general ? 20 : 520;
-        const int y = general ? 46 + (int)general_row++ * 28 : 46 + (int)snapshot_row++ * 28;
+        const int y = general ? 44 + (int)general_row++ * 26 : 44 + (int)snapshot_row++ * 26;
         const int label_width = general ? 190 : 165;
         const int control_height = 23;
         WCHAR snapshot_label[64];
@@ -396,12 +409,17 @@ void ZnapShowSettingsDialog(HINSTANCE instance, HWND owner, const ZnapKeymapRow 
         ZnapRefreshSettingsRow(row);
     }
 
-    ZnapCreateSettingsControl(0, L"STATIC", L"", SS_ETCHEDHORZ, 24, 615, 950, 2, znap_settings_window, 0);
     if (show_snap_warning) {
-        ZnapCreateSettingsControl(0, L"STATIC", L"Znap is can have compatibility issues with Windows default window snapping functionality. It is recommended to disable window snapping from Windows settings.", SS_LEFT, 28, 632, 620, 35, znap_settings_window, 0);
-        ZnapCreateSettingsControl(0, L"BUTTON", L"Open Windows Settings", BS_PUSHBUTTON | WS_TABSTOP, 665, 627, 150, 32, znap_settings_window, ZNAP_OPEN_WINDOWS_SETTINGS);
+        ZnapCreateSettingsControl(0, L"STATIC", L"", SS_ETCHEDHORZ, 24, 573, 950, 2, znap_settings_window, 0);
+        ZnapCreateSettingsControl(0, L"STATIC", L"Windows snapping", SS_LEFT, 28, 581, 730, 18, znap_settings_window, 0);
+        ZnapCreateSettingsControl(0, L"STATIC", L"Znap is can have compatibility issues with Windows default window snapping functionality. It is recommended to disable window snapping from Windows settings for the best user experience.", SS_LEFT, 28, 602, 730, 38, znap_settings_window, 0);
+        ZnapCreateSettingsControl(0, L"BUTTON", L"Open Windows Settings", BS_PUSHBUTTON | WS_TABSTOP, 780, 595, 190, 30, znap_settings_window, ZNAP_OPEN_WINDOWS_SETTINGS);
+        ZnapCreateSettingsControl(0, L"STATIC", L"", SS_ETCHEDHORZ, 24, 645, 950, 2, znap_settings_window, 0);
+        ZnapCreateSettingsControl(0, L"BUTTON", L"Close", BS_DEFPUSHBUTTON | WS_TABSTOP, 830, 657, 140, 24, znap_settings_window, ZNAP_CLOSE_SETTINGS);
+    } else {
+        ZnapCreateSettingsControl(0, L"STATIC", L"", SS_ETCHEDHORZ, 24, 573, 950, 2, znap_settings_window, 0);
+        ZnapCreateSettingsControl(0, L"BUTTON", L"Close", BS_DEFPUSHBUTTON | WS_TABSTOP, 830, 585, 140, 24, znap_settings_window, ZNAP_CLOSE_SETTINGS);
     }
-    ZnapCreateSettingsControl(0, L"BUTTON", L"Close", BS_DEFPUSHBUTTON | WS_TABSTOP, 830, 627, 140, 32, znap_settings_window, ZNAP_CLOSE_SETTINGS);
 
     ZnapCenterDialog(znap_settings_window);
     ShowWindow(znap_settings_window, SW_SHOW);

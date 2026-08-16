@@ -15,6 +15,8 @@ const startup_key = std.unicode.utf8ToUtf16LeStringLiteral("SOFTWARE\\Microsoft\
 const startup_value = std.unicode.utf8ToUtf16LeStringLiteral("Znap");
 const snap_settings_key = std.unicode.utf8ToUtf16LeStringLiteral("Control Panel\\Desktop");
 const snap_settings_value = std.unicode.utf8ToUtf16LeStringLiteral("WindowArrangementActive");
+const znap_registry_key = std.unicode.utf8ToUtf16LeStringLiteral("SOFTWARE\\Znap");
+const snap_warning_shown_value = std.unicode.utf8ToUtf16LeStringLiteral("WindowsSnapWarningShown");
 const single_instance_mutex_name = std.unicode.utf8ToUtf16LeStringLiteral("Local\\Znap.SingleInstance");
 const already_running_message = std.unicode.utf8ToUtf16LeStringLiteral("Znap is already running.");
 
@@ -99,7 +101,10 @@ pub fn main(init: std.process.Init) !void {
     settings_file_path = loaded_settings.path;
 
     const instance = c.GetModuleHandleW(null);
-    if (windowsSnapEnabled()) c.ZnapShowSnapWarning(instance);
+    if (windowsSnapEnabled() and !snapWarningShown()) {
+        c.ZnapShowSnapWarning(instance);
+        markSnapWarningShown();
+    }
 
     var window_class: c.WNDCLASSEXW = std.mem.zeroes(c.WNDCLASSEXW);
     window_class.cbSize = @sizeOf(c.WNDCLASSEXW);
@@ -156,6 +161,44 @@ fn windowsSnapEnabled() bool {
     return value_type == c.REG_SZ and byte_count >= @sizeOf(u16) and value[0] == '1';
 }
 
+fn snapWarningShown() bool {
+    var key: c.HKEY = null;
+    if (c.RegOpenKeyExW(c.ZnapHkeyCurrentUser(), znap_registry_key, 0, c.KEY_QUERY_VALUE, &key) != c.ERROR_SUCCESS) return false;
+    defer _ = c.RegCloseKey(key);
+
+    var value_type: c.DWORD = 0;
+    var value: c.DWORD = 0;
+    var byte_count: c.DWORD = @sizeOf(c.DWORD);
+    return c.RegQueryValueExW(key, snap_warning_shown_value, null, &value_type, @ptrCast(&value), &byte_count) == c.ERROR_SUCCESS and
+        value_type == c.REG_DWORD and byte_count == @sizeOf(c.DWORD) and value != 0;
+}
+
+fn markSnapWarningShown() void {
+    var key: c.HKEY = null;
+    if (c.RegCreateKeyExW(
+        c.ZnapHkeyCurrentUser(),
+        znap_registry_key,
+        0,
+        null,
+        0,
+        c.KEY_SET_VALUE,
+        null,
+        &key,
+        null,
+    ) != c.ERROR_SUCCESS) return;
+    defer _ = c.RegCloseKey(key);
+
+    const value: c.DWORD = 1;
+    _ = c.RegSetValueExW(
+        key,
+        snap_warning_shown_value,
+        0,
+        c.REG_DWORD,
+        @ptrCast(&value),
+        @sizeOf(c.DWORD),
+    );
+}
+
 fn windowProc(hwnd: c.HWND, message: c.UINT, wparam: c.WPARAM, lparam: c.LPARAM) callconv(.c) c.LRESULT {
     switch (message) {
         hotkey_message => handleHotkey(@intCast(wparam)),
@@ -192,7 +235,9 @@ fn keyboardProc(code: c_int, wparam: c.WPARAM, lparam: c.LPARAM) callconv(.c) c.
             if (modifierForKey(event.vkCode)) |modifier| {
                 if (is_key_down) recording_modifiers |= modifier;
                 if (is_key_up) recording_modifiers &= ~modifier;
-            } else if (is_key_down) {
+            } else if (is_key_down and event.vkCode == c.VK_BACK) {
+                c.ZnapRecordKeymap(0, 0);
+            } else if (is_key_down and recording_modifiers != 0) {
                 c.ZnapRecordKeymap(recording_modifiers, event.vkCode);
             }
             return 1;
@@ -665,11 +710,11 @@ fn isSnapshotAction(action: settings.Action) bool {
 
 pub export fn ZnapUpdateKeymap(index: c.UINT, modifiers: c.UINT, key: c.UINT) c.BOOL {
     if (index >= hotkeys.len) return c.FALSE;
-    const previous = hotkeys[index];
-    hotkeys[index].modifiers = modifiers;
-    hotkeys[index].key = key;
+    var previous: [256]settings.LoadedKeymap = undefined;
+    @memcpy(previous[0..hotkeys.len], hotkeys);
+    settings.updateKeymap(hotkeys, index, modifiers, key);
     settings.save(app_io, app_allocator, settings_file_path, hotkeys) catch |err| {
-        hotkeys[index] = previous;
+        @memcpy(hotkeys, previous[0..hotkeys.len]);
         std.log.err("failed to save settings: {s}", .{@errorName(err)});
         return c.FALSE;
     };

@@ -24,8 +24,18 @@ A dependency-free hotkey oriented window manager for Windows 10 & 11 inspired by
 | Store the currently fully visible windows and window focus in snapshot 1–9 or 0 (ignoring always-on-top overlays) | `Win` + `Alt` + `1`–`9` or `0` |
 | Recall snapshot 1–9 or 0, raise its windows, promote them in Alt+Tab, and restore focus | `Win` + `1`–`9` or `0` |
 
-The notification-area menu links to the original documentation, toggles launch at sign-in, and exits the application.
+The notification-area menu opens the settings dialog, links to the original documentation, toggles launch at sign-in, and exits the application.
 Successfully stored windows briefly wiggle down and back up as confirmation.
+
+## Settings
+
+Select **Settings** from Znap's notification-area menu to view and remap the general window-management and snapshot shortcuts. Click a shortcut field, then press a non-modifier key while holding at least one modifier key (`Win`, `Ctrl`, `Alt`, or `Shift`) to record the new shortcut. Press `Backspace` while recording to clear a shortcut.
+
+Changes are saved immediately to `%USERPROFILE%\.config\znap\settings.json` and loaded the next time Znap starts. Assigning a shortcut that is already used by another Znap action clears the duplicate assignment. A yellow warning icon identifies shortcuts that collide with a global Windows shortcut; hover over it for more information.
+
+When Windows window snapping is enabled, the dialog also provides a warning and a shortcut to the relevant Windows settings page.
+
+![Znap settings dialog](assets/settings_dialog.png)
 
 ## Build
 
