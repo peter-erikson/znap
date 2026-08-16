@@ -9,6 +9,7 @@
 #include <dwmapi.h>
 
 DPI_AWARENESS_CONTEXT ZnapPerMonitorV2(void);
+void ZnapSwitchToThisWindow(HWND hwnd);
 HWND ZnapHwndTopmost(void);
 HWND ZnapHwndNotopmost(void);
 HKEY ZnapHkeyCurrentUser(void);

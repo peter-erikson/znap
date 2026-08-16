@@ -7,6 +7,10 @@ DPI_AWARENESS_CONTEXT ZnapPerMonitorV2(void) {
     return DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2;
 }
 
+void ZnapSwitchToThisWindow(HWND hwnd) {
+    SwitchToThisWindow(hwnd, TRUE);
+}
+
 HWND ZnapHwndTopmost(void) {
     return HWND_TOPMOST;
 }

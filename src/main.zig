@@ -317,6 +317,7 @@ fn captureSnapshotWindow(hwnd: c.HWND, lparam: c.LPARAM) callconv(.c) c.BOOL {
 fn recallSnapshot(snapshot_index: usize) void {
     const snapshot = &snapshots[snapshot_index];
     if (!snapshot.stored) return;
+    const previous_focus = c.GetForegroundWindow();
     resetCycles();
 
     for (snapshot.entries[0..snapshot.count]) |entry| {
@@ -342,10 +343,33 @@ fn recallSnapshot(snapshot_index: usize) void {
         }
     }
 
-    if (snapshot.focused != null and c.IsWindow(snapshot.focused) != 0 and isZonableWindow(snapshot.focused)) {
-        if (c.IsIconic(snapshot.focused) != 0) _ = c.ShowWindow(snapshot.focused, c.SW_RESTORE);
-        _ = c.SetForegroundWindow(snapshot.focused);
+    // Windows does not expose its Alt+Tab MRU list. Perform actual task-switch
+    // activations from back to front so Explorer observes each transition in
+    // snapshot order. Leave the desired final focus until last.
+    const final_focus = if (snapshot.focused != null) snapshot.focused else previous_focus;
+    index = snapshot.count;
+    while (index > 0) {
+        index -= 1;
+        const hwnd = snapshot.entries[index].hwnd;
+        if (hwnd == final_focus or c.IsWindow(hwnd) == 0 or !isZonableWindow(hwnd)) continue;
+        activateForTaskSwitch(hwnd);
     }
+
+    if (final_focus != null and c.IsWindow(final_focus) != 0 and isZonableWindow(final_focus)) {
+        if (c.IsIconic(final_focus) != 0) _ = c.ShowWindow(final_focus, c.SW_RESTORE);
+        activateForTaskSwitch(final_focus);
+    }
+}
+
+fn activateForTaskSwitch(hwnd: c.HWND) void {
+    c.ZnapSwitchToThisWindow(hwnd);
+
+    // Foreground changes cross process input queues. Wait briefly until the
+    // requested window is active, then leave Explorer a frame to record it.
+    var attempt: u3 = 0;
+    while (attempt < 6 and c.GetForegroundWindow() != hwnd) : (attempt += 1) c.Sleep(5);
+    if (c.GetForegroundWindow() != hwnd) _ = c.SetForegroundWindow(hwnd);
+    c.Sleep(16);
 }
 
 fn isOccludingWindow(hwnd: c.HWND) bool {
