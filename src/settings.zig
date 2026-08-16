@@ -42,7 +42,7 @@ pub const LoadedKeymap = struct {
 };
 
 pub const LoadedSettings = struct {
-    keymaps: []const LoadedKeymap,
+    keymaps: []LoadedKeymap,
     path: []const u8,
 };
 
@@ -135,7 +135,7 @@ fn createDefaultFile(
     return contents;
 }
 
-pub fn parse(allocator: std.mem.Allocator, contents: []const u8) ![]const LoadedKeymap {
+pub fn parse(allocator: std.mem.Allocator, contents: []const u8) ![]LoadedKeymap {
     const parsed = try std.json.parseFromSlice(Settings, allocator, contents, .{ .allocate = .alloc_always });
     defer parsed.deinit();
     if (parsed.value.keymaps.len > 256) return error.TooManyKeymaps;
@@ -164,6 +164,80 @@ pub fn parse(allocator: std.mem.Allocator, contents: []const u8) ![]const Loaded
     return loaded;
 }
 
+pub fn save(
+    io: std.Io,
+    allocator: std.mem.Allocator,
+    path: []const u8,
+    keymaps: []const LoadedKeymap,
+) !void {
+    const serialized = try allocator.alloc(Keymap, keymaps.len);
+    defer allocator.free(serialized);
+    const modifier_storage = try allocator.alloc([4]Modifier, keymaps.len);
+    defer allocator.free(modifier_storage);
+    const key_storage = try allocator.alloc([16]u8, keymaps.len);
+    defer allocator.free(key_storage);
+
+    for (keymaps, serialized, modifier_storage, key_storage) |keymap, *output, *modifiers, *key_buffer| {
+        var modifier_count: usize = 0;
+        inline for (.{
+            .{ mod_win, Modifier.win },
+            .{ mod_control, Modifier.control },
+            .{ mod_alt, Modifier.alt },
+            .{ mod_shift, Modifier.shift },
+        }) |entry| {
+            if (keymap.modifiers & entry[0] != 0) {
+                modifiers[modifier_count] = entry[1];
+                modifier_count += 1;
+            }
+        }
+        output.* = .{
+            .modifiers = modifiers[0..modifier_count],
+            .key = keyName(keymap.key, key_buffer),
+            .action = keymap.action,
+            .snapshot_index = if (keymap.action == .store_snapshot or keymap.action == .recall_snapshot)
+                keymap.snapshot_index
+            else
+                null,
+        };
+    }
+
+    const contents = try std.fmt.allocPrint(allocator, "{f}\n", .{std.json.fmt(
+        Settings{ .keymaps = serialized },
+        .{ .whitespace = .indent_2 },
+    )});
+    defer allocator.free(contents);
+    var atomic = try std.Io.Dir.cwd().createFileAtomic(io, path, .{ .replace = true });
+    defer atomic.deinit(io);
+    try atomic.file.writeStreamingAll(io, contents);
+    try atomic.replace(io);
+}
+
+fn keyName(key: u32, buffer: *[16]u8) []const u8 {
+    if (key <= std.math.maxInt(u8)) {
+        const byte: u8 = @intCast(key);
+        if (std.ascii.isDigit(byte) or std.ascii.isUpper(byte)) {
+            buffer[0] = std.ascii.toLower(byte);
+            return buffer[0..1];
+        }
+    }
+    const names = .{
+        .{ 0x25, "left" },
+        .{ 0x26, "up" },
+        .{ 0x27, "right" },
+        .{ 0x28, "down" },
+        .{ 0x21, "page_up" },
+        .{ 0x22, "page_down" },
+        .{ 0x0D, "enter" },
+        .{ 0x2D, "insert" },
+        .{ 0x2E, "delete" },
+        .{ 0xDC, "backslash" },
+    };
+    inline for (names) |entry| {
+        if (key == entry[0]) return entry[1];
+    }
+    return std.fmt.bufPrint(buffer, "vk_{X:0>2}", .{key}) catch unreachable;
+}
+
 fn keyCode(name: []const u8) !u32 {
     if (name.len == 1) {
         const key = std.ascii.toUpper(name[0]);
@@ -183,6 +257,9 @@ fn keyCode(name: []const u8) !u32 {
     };
     inline for (names) |entry| {
         if (std.ascii.eqlIgnoreCase(name, entry[0])) return entry[1];
+    }
+    if (name.len > 3 and std.ascii.eqlIgnoreCase(name[0..3], "vk_")) {
+        return std.fmt.parseInt(u32, name[3..], 16) catch return error.UnknownKey;
     }
     return error.UnknownKey;
 }
@@ -218,4 +295,11 @@ test "snapshot keymaps require an index" {
         \\{"keymaps":[{"modifiers":["win"],"key":"1","action":"recall_snapshot"}]}
     ;
     try std.testing.expectError(error.MissingSnapshotIndex, parse(std.testing.allocator, contents));
+}
+
+test "arbitrary virtual keys round trip through key names" {
+    var buffer: [16]u8 = undefined;
+    const name = keyName(0x70, &buffer);
+    try std.testing.expectEqualStrings("vk_70", name);
+    try std.testing.expectEqual(@as(u32, 0x70), try keyCode(name));
 }

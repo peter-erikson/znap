@@ -35,11 +35,14 @@ var message_window: c.HWND = null;
 var keyboard_hook: c.HHOOK = null;
 var keyboard_hook_ready: c.HANDLE = null;
 var keyboard_hook_thread_id: c.DWORD = 0;
+var recording_modifiers: u32 = 0;
 var suppressed_keys = [_]bool{false} ** 256;
 var tray_data: c.NOTIFYICONDATAW = std.mem.zeroes(c.NOTIFYICONDATAW);
 var maximize_states: window_states.Store = .{};
-var hotkeys: []const settings.LoadedKeymap = &.{};
-var settings_file_path: ?[:0]const u16 = null;
+var hotkeys: []settings.LoadedKeymap = &.{};
+var app_io: std.Io = undefined;
+var app_allocator: std.mem.Allocator = undefined;
+var settings_file_path: []const u8 = &.{};
 
 const snapshot_capacity = 64;
 const occluder_capacity = 1024;
@@ -86,12 +89,14 @@ pub fn main(init: std.process.Init) !void {
 
     _ = c.SetProcessDpiAwarenessContext(c.ZnapPerMonitorV2());
 
-    const loaded_settings = settings.load(init.io, init.arena.allocator(), init.environ_map) catch |err| {
+    app_io = init.io;
+    app_allocator = init.gpa;
+    const loaded_settings = settings.load(app_io, init.arena.allocator(), init.environ_map) catch |err| {
         std.log.err("failed to load settings: {s}", .{@errorName(err)});
         return err;
     };
     hotkeys = loaded_settings.keymaps;
-    settings_file_path = try std.unicode.utf8ToUtf16LeAllocZ(init.arena.allocator(), loaded_settings.path);
+    settings_file_path = loaded_settings.path;
 
     const instance = c.GetModuleHandleW(null);
     if (windowsSnapEnabled()) c.ZnapShowSnapWarning(instance);
@@ -180,10 +185,22 @@ fn keyboardHookThread(instance: c.HINSTANCE) void {
 fn keyboardProc(code: c_int, wparam: c.WPARAM, lparam: c.LPARAM) callconv(.c) c.LRESULT {
     if (code == c.HC_ACTION) {
         const event: *const c.KBDLLHOOKSTRUCT = @ptrFromInt(@as(usize, @bitCast(lparam)));
+        const is_key_down = wparam == c.WM_KEYDOWN or wparam == c.WM_SYSKEYDOWN;
+        const is_key_up = wparam == c.WM_KEYUP or wparam == c.WM_SYSKEYUP;
+
+        if (c.ZnapSettingsRecording() != 0) {
+            if (modifierForKey(event.vkCode)) |modifier| {
+                if (is_key_down) recording_modifiers |= modifier;
+                if (is_key_up) recording_modifiers &= ~modifier;
+            } else if (is_key_down) {
+                c.ZnapRecordKeymap(recording_modifiers, event.vkCode);
+            }
+            return 1;
+        }
+        recording_modifiers = 0;
+
         if (event.vkCode < suppressed_keys.len) {
             const key_index: usize = @intCast(event.vkCode);
-            const is_key_down = wparam == c.WM_KEYDOWN or wparam == c.WM_SYSKEYDOWN;
-            const is_key_up = wparam == c.WM_KEYUP or wparam == c.WM_SYSKEYUP;
 
             if (is_key_up and suppressed_keys[key_index]) {
                 suppressed_keys[key_index] = false;
@@ -204,6 +221,16 @@ fn keyboardProc(code: c_int, wparam: c.WPARAM, lparam: c.LPARAM) callconv(.c) c.
         }
     }
     return c.CallNextHookEx(keyboard_hook, code, wparam, lparam);
+}
+
+fn modifierForKey(key: u32) ?u32 {
+    return switch (key) {
+        c.VK_MENU, c.VK_LMENU, c.VK_RMENU => mod_alt,
+        c.VK_CONTROL, c.VK_LCONTROL, c.VK_RCONTROL => mod_control,
+        c.VK_SHIFT, c.VK_LSHIFT, c.VK_RSHIFT => mod_shift,
+        c.VK_LWIN, c.VK_RWIN => mod_win,
+        else => null,
+    };
 }
 
 fn currentModifiers() u32 {
@@ -588,13 +615,65 @@ fn showTrayMenu(hwnd: c.HWND) void {
     const command = c.TrackPopupMenu(menu, c.TPM_RETURNCMD | c.TPM_NONOTIFY | c.TPM_RIGHTBUTTON, point.x, point.y, 0, hwnd, null);
     switch (command) {
         menu_documentation => _ = c.ShellExecuteW(hwnd, std.unicode.utf8ToUtf16LeStringLiteral("open"), documentation_url, null, null, c.SW_SHOWNORMAL),
-        menu_settings => if (settings_file_path) |path| {
-            _ = c.ShellExecuteW(hwnd, std.unicode.utf8ToUtf16LeStringLiteral("open"), path.ptr, null, null, c.SW_SHOWNORMAL);
-        },
+        menu_settings => showSettingsDialog(hwnd),
         menu_startup => if (autoRunEnabled()) disableAutoRun() else enableAutoRun(),
         menu_quit => _ = c.DestroyWindow(hwnd),
         else => {},
     }
+}
+
+fn showSettingsDialog(owner: c.HWND) void {
+    var rows: [256]c.ZnapKeymapRow = undefined;
+    var row_count: usize = 0;
+
+    for (hotkeys, 0..) |hotkey, index| {
+        if (isSnapshotAction(hotkey.action)) continue;
+        rows[row_count] = makeSettingsRow(index, hotkey);
+        row_count += 1;
+    }
+    const general_count = row_count;
+    for (hotkeys, 0..) |hotkey, index| {
+        if (!isSnapshotAction(hotkey.action)) continue;
+        rows[row_count] = makeSettingsRow(index, hotkey);
+        row_count += 1;
+    }
+
+    const instance = c.GetModuleHandleW(null);
+    c.ZnapShowSettingsDialog(
+        instance,
+        owner,
+        if (row_count == 0) null else &rows[0],
+        @intCast(row_count),
+        @intCast(general_count),
+        if (windowsSnapEnabled()) c.TRUE else c.FALSE,
+    );
+}
+
+fn makeSettingsRow(index: usize, hotkey: settings.LoadedKeymap) c.ZnapKeymapRow {
+    return .{
+        .index = @intCast(index),
+        .action = @intFromEnum(hotkey.action),
+        .snapshot_index = hotkey.snapshot_index,
+        .modifiers = hotkey.modifiers,
+        .key = hotkey.key,
+    };
+}
+
+fn isSnapshotAction(action: settings.Action) bool {
+    return action == .store_snapshot or action == .recall_snapshot;
+}
+
+pub export fn ZnapUpdateKeymap(index: c.UINT, modifiers: c.UINT, key: c.UINT) c.BOOL {
+    if (index >= hotkeys.len) return c.FALSE;
+    const previous = hotkeys[index];
+    hotkeys[index].modifiers = modifiers;
+    hotkeys[index].key = key;
+    settings.save(app_io, app_allocator, settings_file_path, hotkeys) catch |err| {
+        hotkeys[index] = previous;
+        std.log.err("failed to save settings: {s}", .{@errorName(err)});
+        return c.FALSE;
+    };
+    return c.TRUE;
 }
 
 fn autoRunEnabled() bool {
