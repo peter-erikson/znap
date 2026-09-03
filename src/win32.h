@@ -15,6 +15,9 @@ HWND ZnapHwndNotopmost(void);
 HKEY ZnapHkeyCurrentUser(void);
 BOOL ZnapMarkWindowsKeyUsed(void);
 void ZnapShowSnapWarning(HINSTANCE instance);
+BOOL ZnapStartupTaskEnabled(void);
+BOOL ZnapSetStartupTask(BOOL enabled);
+BOOL ZnapSetStartupTaskElevated(BOOL enabled);
 
 typedef struct ZnapKeymapRow {
     UINT index;

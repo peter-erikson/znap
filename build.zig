@@ -22,7 +22,7 @@ pub fn build(b: *std.Build) void {
     });
     root_module.addCSourceFile(.{ .file = b.path("src/win32_shim.c"), .flags = &.{} });
     root_module.addWin32ResourceFile(.{ .file = b.path("resources.rc") });
-    inline for (&.{ "user32", "gdi32", "dwmapi", "shell32", "advapi32" }) |lib| {
+    inline for (&.{ "user32", "gdi32", "dwmapi", "shell32", "advapi32", "ole32", "oleaut32", "secur32" }) |lib| {
         root_module.linkSystemLibrary(lib, .{});
     }
 

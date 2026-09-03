@@ -1,7 +1,251 @@
+#define COBJMACROS
+#define SECURITY_WIN32
 #ifndef UNICODE
 #define UNICODE
 #endif
 #include "win32.h"
+#include <initguid.h>
+#include <taskschd.h>
+#include <secext.h>
+#include <oleauto.h>
+
+#define ZNAP_TASK_NAME L"Znap"
+#define ZNAP_TASK_DESCRIPTION L"Starts Znap when the current user signs in."
+#define ZNAP_LEGACY_STARTUP_KEY L"SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Run"
+#define ZNAP_LEGACY_STARTUP_VALUE L"Znap"
+
+typedef struct ZnapTaskScheduler {
+    BOOL uninitialize_com;
+    ITaskService *service;
+    ITaskFolder *root;
+} ZnapTaskScheduler;
+
+static void ZnapCloseTaskScheduler(ZnapTaskScheduler *scheduler) {
+    if (scheduler->root != NULL) ITaskFolder_Release(scheduler->root);
+    if (scheduler->service != NULL) ITaskService_Release(scheduler->service);
+    if (scheduler->uninitialize_com) CoUninitialize();
+}
+
+static HRESULT ZnapOpenTaskScheduler(ZnapTaskScheduler *scheduler) {
+    ZeroMemory(scheduler, sizeof(*scheduler));
+    HRESULT hr = CoInitializeEx(NULL, COINIT_APARTMENTTHREADED);
+    if (SUCCEEDED(hr)) scheduler->uninitialize_com = TRUE;
+    else if (hr != RPC_E_CHANGED_MODE) return hr;
+
+    hr = CoCreateInstance(&CLSID_TaskScheduler, NULL, CLSCTX_INPROC_SERVER,
+        &IID_ITaskService, (void **)&scheduler->service);
+    if (FAILED(hr)) return hr;
+
+    VARIANT empty;
+    VariantInit(&empty);
+    hr = ITaskService_Connect(scheduler->service, empty, empty, empty, empty);
+    if (FAILED(hr)) return hr;
+
+    BSTR root_path = SysAllocString(L"\\");
+    if (root_path == NULL) return E_OUTOFMEMORY;
+    hr = ITaskService_GetFolder(scheduler->service, root_path, &scheduler->root);
+    SysFreeString(root_path);
+    return hr;
+}
+
+static BSTR ZnapCurrentUserName(void) {
+    WCHAR user_name[512];
+    ULONG length = ARRAYSIZE(user_name);
+    if (!GetUserNameExW(NameSamCompatible, user_name, &length)) return NULL;
+    return SysAllocString(user_name);
+}
+
+BOOL ZnapStartupTaskEnabled(void) {
+    ZnapTaskScheduler scheduler;
+    HRESULT hr = ZnapOpenTaskScheduler(&scheduler);
+    if (FAILED(hr)) {
+        ZnapCloseTaskScheduler(&scheduler);
+        return FALSE;
+    }
+
+    BSTR task_name = SysAllocString(ZNAP_TASK_NAME);
+    IRegisteredTask *task = NULL;
+    VARIANT_BOOL enabled = VARIANT_FALSE;
+    if (task_name != NULL) hr = ITaskFolder_GetTask(scheduler.root, task_name, &task);
+    else hr = E_OUTOFMEMORY;
+    if (SUCCEEDED(hr)) hr = IRegisteredTask_get_Enabled(task, &enabled);
+    if (task != NULL) IRegisteredTask_Release(task);
+    SysFreeString(task_name);
+    ZnapCloseTaskScheduler(&scheduler);
+    return SUCCEEDED(hr) && enabled == VARIANT_TRUE;
+}
+
+static HRESULT ZnapDeleteStartupTask(ITaskFolder *root) {
+    BSTR task_name = SysAllocString(ZNAP_TASK_NAME);
+    if (task_name == NULL) return E_OUTOFMEMORY;
+    HRESULT hr = ITaskFolder_DeleteTask(root, task_name, 0);
+    SysFreeString(task_name);
+    if (hr == HRESULT_FROM_WIN32(ERROR_FILE_NOT_FOUND)) return S_OK;
+    return hr;
+}
+
+static HRESULT ZnapCreateStartupTask(ITaskService *service, ITaskFolder *root) {
+    HRESULT hr;
+    ITaskDefinition *definition = NULL;
+    IRegistrationInfo *registration = NULL;
+    IPrincipal *principal = NULL;
+    ITaskSettings *settings = NULL;
+    ITriggerCollection *triggers = NULL;
+    ITrigger *trigger = NULL;
+    ILogonTrigger *logon_trigger = NULL;
+    IActionCollection *actions = NULL;
+    IAction *action = NULL;
+    IExecAction *exec_action = NULL;
+    IRegisteredTask *registered_task = NULL;
+    BSTR user_name = NULL;
+    BSTR text = NULL;
+    BSTR executable = NULL;
+    BSTR task_name = NULL;
+
+    hr = ITaskService_NewTask(service, 0, &definition);
+    if (FAILED(hr)) goto cleanup;
+
+    hr = ITaskDefinition_get_RegistrationInfo(definition, &registration);
+    if (FAILED(hr)) goto cleanup;
+    text = SysAllocString(ZNAP_TASK_DESCRIPTION);
+    if (text == NULL) { hr = E_OUTOFMEMORY; goto cleanup; }
+    hr = IRegistrationInfo_put_Description(registration, text);
+    SysFreeString(text);
+    text = NULL;
+    if (FAILED(hr)) goto cleanup;
+
+    user_name = ZnapCurrentUserName();
+    if (user_name == NULL) { hr = HRESULT_FROM_WIN32(GetLastError()); goto cleanup; }
+    hr = ITaskDefinition_get_Principal(definition, &principal);
+    if (FAILED(hr)) goto cleanup;
+    hr = IPrincipal_put_UserId(principal, user_name);
+    if (FAILED(hr)) goto cleanup;
+    hr = IPrincipal_put_LogonType(principal, TASK_LOGON_INTERACTIVE_TOKEN);
+    if (FAILED(hr)) goto cleanup;
+    hr = IPrincipal_put_RunLevel(principal, TASK_RUNLEVEL_HIGHEST);
+    if (FAILED(hr)) goto cleanup;
+
+    hr = ITaskDefinition_get_Settings(definition, &settings);
+    if (FAILED(hr)) goto cleanup;
+    hr = ITaskSettings_put_StartWhenAvailable(settings, VARIANT_TRUE);
+    if (FAILED(hr)) goto cleanup;
+    hr = ITaskSettings_put_DisallowStartIfOnBatteries(settings, VARIANT_FALSE);
+    if (FAILED(hr)) goto cleanup;
+    hr = ITaskSettings_put_StopIfGoingOnBatteries(settings, VARIANT_FALSE);
+    if (FAILED(hr)) goto cleanup;
+    text = SysAllocString(L"PT0S");
+    if (text == NULL) { hr = E_OUTOFMEMORY; goto cleanup; }
+    hr = ITaskSettings_put_ExecutionTimeLimit(settings, text);
+    SysFreeString(text);
+    text = NULL;
+    if (FAILED(hr)) goto cleanup;
+
+    hr = ITaskDefinition_get_Triggers(definition, &triggers);
+    if (FAILED(hr)) goto cleanup;
+    hr = ITriggerCollection_Create(triggers, TASK_TRIGGER_LOGON, &trigger);
+    if (FAILED(hr)) goto cleanup;
+    hr = ITrigger_QueryInterface(trigger, &IID_ILogonTrigger, (void **)&logon_trigger);
+    if (FAILED(hr)) goto cleanup;
+    hr = ILogonTrigger_put_UserId(logon_trigger, user_name);
+    if (FAILED(hr)) goto cleanup;
+    hr = ILogonTrigger_put_Enabled(logon_trigger, VARIANT_TRUE);
+    if (FAILED(hr)) goto cleanup;
+    text = SysAllocString(L"PT10S");
+    if (text == NULL) { hr = E_OUTOFMEMORY; goto cleanup; }
+    hr = ILogonTrigger_put_Delay(logon_trigger, text);
+    SysFreeString(text);
+    text = NULL;
+    if (FAILED(hr)) goto cleanup;
+
+    hr = ITaskDefinition_get_Actions(definition, &actions);
+    if (FAILED(hr)) goto cleanup;
+    hr = IActionCollection_Create(actions, TASK_ACTION_EXEC, &action);
+    if (FAILED(hr)) goto cleanup;
+    hr = IAction_QueryInterface(action, &IID_IExecAction, (void **)&exec_action);
+    if (FAILED(hr)) goto cleanup;
+
+    WCHAR executable_path[32768];
+    DWORD executable_length = GetModuleFileNameW(NULL, executable_path, ARRAYSIZE(executable_path));
+    if (executable_length == 0 || executable_length == ARRAYSIZE(executable_path)) {
+        hr = HRESULT_FROM_WIN32(GetLastError());
+        goto cleanup;
+    }
+    executable = SysAllocString(executable_path);
+    if (executable == NULL) { hr = E_OUTOFMEMORY; goto cleanup; }
+    hr = IExecAction_put_Path(exec_action, executable);
+    if (FAILED(hr)) goto cleanup;
+
+    task_name = SysAllocString(ZNAP_TASK_NAME);
+    if (task_name == NULL) { hr = E_OUTOFMEMORY; goto cleanup; }
+    VARIANT user;
+    VARIANT password;
+    VARIANT security_descriptor;
+    VariantInit(&user);
+    VariantInit(&password);
+    VariantInit(&security_descriptor);
+    V_VT(&user) = VT_BSTR;
+    V_BSTR(&user) = user_name;
+    hr = ITaskFolder_RegisterTaskDefinition(root, task_name, definition, TASK_CREATE_OR_UPDATE,
+        user, password, TASK_LOGON_INTERACTIVE_TOKEN, security_descriptor, &registered_task);
+
+cleanup:
+    if (registered_task != NULL) IRegisteredTask_Release(registered_task);
+    SysFreeString(task_name);
+    SysFreeString(executable);
+    SysFreeString(text);
+    if (exec_action != NULL) IExecAction_Release(exec_action);
+    if (action != NULL) IAction_Release(action);
+    if (actions != NULL) IActionCollection_Release(actions);
+    if (logon_trigger != NULL) ILogonTrigger_Release(logon_trigger);
+    if (trigger != NULL) ITrigger_Release(trigger);
+    if (triggers != NULL) ITriggerCollection_Release(triggers);
+    if (settings != NULL) ITaskSettings_Release(settings);
+    if (principal != NULL) IPrincipal_Release(principal);
+    SysFreeString(user_name);
+    if (registration != NULL) IRegistrationInfo_Release(registration);
+    if (definition != NULL) ITaskDefinition_Release(definition);
+    return hr;
+}
+
+static void ZnapDeleteLegacyStartupValue(void) {
+    HKEY key = NULL;
+    if (RegOpenKeyExW(HKEY_CURRENT_USER, ZNAP_LEGACY_STARTUP_KEY, 0, KEY_SET_VALUE, &key) != ERROR_SUCCESS) return;
+    RegDeleteValueW(key, ZNAP_LEGACY_STARTUP_VALUE);
+    RegCloseKey(key);
+}
+
+BOOL ZnapSetStartupTask(BOOL enabled) {
+    ZnapTaskScheduler scheduler;
+    HRESULT hr = ZnapOpenTaskScheduler(&scheduler);
+    if (SUCCEEDED(hr)) {
+        hr = enabled ? ZnapCreateStartupTask(scheduler.service, scheduler.root)
+                     : ZnapDeleteStartupTask(scheduler.root);
+    }
+    if (SUCCEEDED(hr)) ZnapDeleteLegacyStartupValue();
+    ZnapCloseTaskScheduler(&scheduler);
+    return SUCCEEDED(hr);
+}
+
+BOOL ZnapSetStartupTaskElevated(BOOL enabled) {
+    WCHAR executable[32768];
+    DWORD length = GetModuleFileNameW(NULL, executable, ARRAYSIZE(executable));
+    if (length == 0 || length == ARRAYSIZE(executable)) return FALSE;
+
+    SHELLEXECUTEINFOW launch = {0};
+    launch.cbSize = sizeof(launch);
+    launch.fMask = SEE_MASK_NOCLOSEPROCESS | SEE_MASK_NOASYNC;
+    launch.lpVerb = L"runas";
+    launch.lpFile = executable;
+    launch.lpParameters = enabled ? L"--install-startup-task" : L"--remove-startup-task";
+    launch.nShow = SW_HIDE;
+    if (!ShellExecuteExW(&launch) || launch.hProcess == NULL) return FALSE;
+
+    DWORD wait_result = WaitForSingleObject(launch.hProcess, INFINITE);
+    DWORD exit_code = 1;
+    BOOL got_exit_code = GetExitCodeProcess(launch.hProcess, &exit_code);
+    CloseHandle(launch.hProcess);
+    return wait_result == WAIT_OBJECT_0 && got_exit_code && exit_code == 0;
+}
 
 DPI_AWARENESS_CONTEXT ZnapPerMonitorV2(void) {
     return DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2;

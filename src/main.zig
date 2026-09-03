@@ -11,8 +11,6 @@ comptime {
 const app_name = std.unicode.utf8ToUtf16LeStringLiteral("Znap");
 const class_name = std.unicode.utf8ToUtf16LeStringLiteral("Znap.MessageWindow");
 const documentation_url = std.unicode.utf8ToUtf16LeStringLiteral("https://github.com/peter-erikson/znap");
-const startup_key = std.unicode.utf8ToUtf16LeStringLiteral("SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Run");
-const startup_value = std.unicode.utf8ToUtf16LeStringLiteral("Znap");
 const snap_settings_key = std.unicode.utf8ToUtf16LeStringLiteral("Control Panel\\Desktop");
 const snap_settings_value = std.unicode.utf8ToUtf16LeStringLiteral("WindowArrangementActive");
 const znap_registry_key = std.unicode.utf8ToUtf16LeStringLiteral("SOFTWARE\\Znap");
@@ -80,6 +78,14 @@ const AnimationWindow = struct {
 var snapshots = [_]WindowSnapshot{.{}} ** 10;
 
 pub fn main(init: std.process.Init) !void {
+    const args = try init.minimal.args.toSlice(init.arena.allocator());
+    if (args.len == 2 and std.mem.eql(u8, args[1], "--install-startup-task")) {
+        std.process.exit(if (c.ZnapSetStartupTask(c.TRUE) != 0) 0 else 1);
+    }
+    if (args.len == 2 and std.mem.eql(u8, args[1], "--remove-startup-task")) {
+        std.process.exit(if (c.ZnapSetStartupTask(c.FALSE) != 0) 0 else 1);
+    }
+
     const single_instance_mutex = c.CreateMutexW(null, c.TRUE, single_instance_mutex_name);
     if (single_instance_mutex == null) return error.CreateSingleInstanceMutexFailed;
     defer _ = c.CloseHandle(single_instance_mutex);
@@ -630,7 +636,13 @@ fn addTrayIcon(instance: c.HINSTANCE) !void {
     tray_data.hIcon = c.LoadIconW(instance, @ptrFromInt(2));
     const tooltip = app_name[0..app_name.len];
     @memcpy(tray_data.szTip[0..tooltip.len], tooltip);
-    if (c.Shell_NotifyIconW(c.NIM_ADD, &tray_data) == 0) return error.AddTrayIconFailed;
+    // A logon task can start before Explorer has created its notification
+    // area. Give the shell time to finish starting instead of exiting.
+    var attempt: u6 = 0;
+    while (c.Shell_NotifyIconW(c.NIM_ADD, &tray_data) == 0) : (attempt += 1) {
+        if (attempt == 29) return error.AddTrayIconFailed;
+        c.Sleep(1000);
+    }
     tray_data.unnamed_0.uVersion = c.NOTIFYICON_VERSION_4;
     _ = c.Shell_NotifyIconW(c.NIM_SETVERSION, &tray_data);
 }
@@ -649,7 +661,7 @@ fn showTrayMenu(hwnd: c.HWND) void {
     _ = c.AppendMenuW(menu, c.MF_STRING, menu_documentation, std.unicode.utf8ToUtf16LeStringLiteral("Documentation"));
     _ = c.AppendMenuW(menu, c.MF_STRING, menu_settings, std.unicode.utf8ToUtf16LeStringLiteral("Settings"));
     _ = c.AppendMenuW(menu, c.MF_SEPARATOR, 0, null);
-    const startup_flags: c.UINT = if (autoRunEnabled()) 0x00000008 else 0;
+    const startup_flags: c.UINT = if (c.ZnapStartupTaskEnabled() != 0) c.MF_CHECKED else 0;
     _ = c.AppendMenuW(menu, startup_flags, menu_startup, std.unicode.utf8ToUtf16LeStringLiteral("Run on startup"));
     _ = c.AppendMenuW(menu, c.MF_SEPARATOR, 0, null);
     _ = c.AppendMenuW(menu, c.MF_STRING, menu_quit, std.unicode.utf8ToUtf16LeStringLiteral("Quit"));
@@ -661,7 +673,7 @@ fn showTrayMenu(hwnd: c.HWND) void {
     switch (command) {
         menu_documentation => _ = c.ShellExecuteW(hwnd, std.unicode.utf8ToUtf16LeStringLiteral("open"), documentation_url, null, null, c.SW_SHOWNORMAL),
         menu_settings => showSettingsDialog(hwnd),
-        menu_startup => if (autoRunEnabled()) disableAutoRun() else enableAutoRun(),
+        menu_startup => toggleAutoRun(hwnd),
         menu_quit => _ = c.DestroyWindow(hwnd),
         else => {},
     }
@@ -721,38 +733,14 @@ pub export fn ZnapUpdateKeymap(index: c.UINT, modifiers: c.UINT, key: c.UINT) c.
     return c.TRUE;
 }
 
-fn autoRunEnabled() bool {
-    var key: c.HKEY = null;
-    const current_user: c.HKEY = c.ZnapHkeyCurrentUser();
-    if (c.RegOpenKeyExW(current_user, startup_key, 0, c.KEY_QUERY_VALUE, &key) != c.ERROR_SUCCESS) return false;
-    defer _ = c.RegCloseKey(key);
-    var value_type: c.DWORD = 0;
-    var bytes: c.DWORD = 0;
-    return c.RegQueryValueExW(key, startup_value, null, &value_type, null, &bytes) == c.ERROR_SUCCESS and value_type == c.REG_SZ and bytes > @sizeOf(u16);
-}
-
-fn enableAutoRun() void {
-    var key: c.HKEY = null;
-    const current_user: c.HKEY = c.ZnapHkeyCurrentUser();
-    if (c.RegOpenKeyExW(current_user, startup_key, 0, c.KEY_SET_VALUE, &key) != c.ERROR_SUCCESS) return;
-    defer _ = c.RegCloseKey(key);
-
-    var executable: [32768]u16 = [_]u16{0} ** 32768;
-    const length = c.GetModuleFileNameW(null, &executable, executable.len - 3);
-    if (length == 0) return;
-    var command: [32768]u16 = [_]u16{0} ** 32768;
-    command[0] = '"';
-    @memcpy(command[1 .. length + 1], executable[0..length]);
-    command[length + 1] = '"';
-    command[length + 2] = 0;
-    const byte_length: c.DWORD = @intCast((length + 3) * @sizeOf(u16));
-    _ = c.RegSetValueExW(key, startup_value, 0, c.REG_SZ, @ptrCast(&command), byte_length);
-}
-
-fn disableAutoRun() void {
-    var key: c.HKEY = null;
-    const current_user: c.HKEY = c.ZnapHkeyCurrentUser();
-    if (c.RegOpenKeyExW(current_user, startup_key, 0, c.KEY_SET_VALUE, &key) != c.ERROR_SUCCESS) return;
-    defer _ = c.RegCloseKey(key);
-    _ = c.RegDeleteValueW(key, startup_value);
+fn toggleAutoRun(owner: c.HWND) void {
+    const enable = c.ZnapStartupTaskEnabled() == 0;
+    if (c.ZnapSetStartupTaskElevated(if (enable) c.TRUE else c.FALSE) == 0) {
+        _ = c.MessageBoxW(
+            owner,
+            std.unicode.utf8ToUtf16LeStringLiteral("The scheduled startup task could not be updated."),
+            app_name,
+            c.MB_OK | c.MB_ICONERROR,
+        );
+    }
 }
