@@ -10,6 +10,7 @@
         "src",
         "assets",
         "resources.rc",
+        "znap.manifest",
         "README.md",
         "LICENSE",
         "NOTICE",

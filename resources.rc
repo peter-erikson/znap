@@ -1,5 +1,6 @@
 #include <windows.h>
 
+1 RT_MANIFEST "znap.manifest"
 1 ICON "assets/znap_icon.ico"
 2 ICON "assets/znap_tray_icon.ico"
 

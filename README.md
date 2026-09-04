@@ -35,6 +35,8 @@ Changes are saved immediately to `%USERPROFILE%\.config\znap\settings.json` and 
 
 When Windows window snapping is enabled, the dialog also provides a warning and a shortcut to the relevant Windows settings page.
 
+The settings window follows the Windows light, dark, and high-contrast themes, uses system UI fonts, and rescales when moved between displays with different DPI settings.
+
 ![Znap settings dialog](assets/settings_dialog.png)
 
 ## Run on startup

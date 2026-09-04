@@ -8,6 +8,8 @@
 #include <taskschd.h>
 #include <secext.h>
 #include <oleauto.h>
+#include <commctrl.h>
+#include <uxtheme.h>
 
 #define ZNAP_TASK_NAME L"Znap"
 #define ZNAP_TASK_DESCRIPTION L"Starts Znap when the current user signs in."
@@ -276,6 +278,35 @@ BOOL ZnapMarkWindowsKeyUsed(void) {
     return SendInput(2, inputs, sizeof(INPUT)) == 2;
 }
 
+static BOOL ZnapHighContrastEnabled(void) {
+    HIGHCONTRASTW high_contrast = {0};
+    high_contrast.cbSize = sizeof(high_contrast);
+    return SystemParametersInfoW(SPI_GETHIGHCONTRAST, sizeof(high_contrast), &high_contrast, 0) &&
+        (high_contrast.dwFlags & HCF_HIGHCONTRASTON) != 0;
+}
+
+static BOOL ZnapDarkModeEnabled(void) {
+    if (ZnapHighContrastEnabled()) return FALSE;
+    HKEY key = NULL;
+    if (RegOpenKeyExW(HKEY_CURRENT_USER,
+        L"SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Themes\\Personalize",
+        0, KEY_QUERY_VALUE, &key) != ERROR_SUCCESS) return FALSE;
+    DWORD use_light_theme = 1;
+    DWORD type = 0;
+    DWORD size = sizeof(use_light_theme);
+    const LONG result = RegQueryValueExW(key, L"AppsUseLightTheme", NULL, &type,
+        (BYTE *)&use_light_theme, &size);
+    RegCloseKey(key);
+    return result == ERROR_SUCCESS && type == REG_DWORD && use_light_theme == 0;
+}
+
+static void ZnapApplyWindowChrome(HWND window) {
+    const BOOL dark = ZnapDarkModeEnabled();
+    const DWORD round_corners = 2; /* DWMWCP_ROUND */
+    DwmSetWindowAttribute(window, (enum DWMWINDOWATTRIBUTE)20, &dark, sizeof(dark));
+    DwmSetWindowAttribute(window, (enum DWMWINDOWATTRIBUTE)33, &round_corners, sizeof(round_corners));
+}
+
 static void ZnapCenterDialog(HWND dialog) {
     RECT dialog_rect;
     MONITORINFO monitor_info = {0};
@@ -299,8 +330,13 @@ static INT_PTR CALLBACK ZnapSnapWarningProc(HWND dialog, UINT message, WPARAM wp
             SendMessageW(dialog, WM_SETICON, ICON_SMALL, (LPARAM)icon);
             SendMessageW(dialog, WM_SETICON, ICON_BIG, (LPARAM)icon);
         }
+        ZnapApplyWindowChrome(dialog);
         ZnapCenterDialog(dialog);
         return TRUE;
+    }
+    if (message == WM_THEMECHANGED || message == WM_SETTINGCHANGE) {
+        ZnapApplyWindowChrome(dialog);
+        RedrawWindow(dialog, NULL, NULL, RDW_INVALIDATE | RDW_ALLCHILDREN | RDW_ERASE);
     }
     if (message != WM_COMMAND) return FALSE;
 
@@ -351,7 +387,129 @@ static HWND znap_settings_tooltip = NULL;
 static LONG znap_active_tooltip_row = -1;
 static LONG znap_hover_tooltip_row = -1;
 static DWORD znap_tooltip_hover_started = 0;
+static UINT znap_settings_dpi = 96;
+static BOOL znap_settings_dark = FALSE;
+static BOOL znap_settings_high_contrast = FALSE;
+static COLORREF znap_settings_background_color = RGB(243, 243, 243);
+static COLORREF znap_settings_surface_color = RGB(255, 255, 255);
+static COLORREF znap_settings_text_color = RGB(24, 24, 24);
+static COLORREF znap_settings_tooltip_color = RGB(255, 255, 225);
+static HBRUSH znap_settings_background_brush = NULL;
+static HBRUSH znap_settings_surface_brush = NULL;
+static HBRUSH znap_settings_tooltip_brush = NULL;
 static WCHAR znap_collision_tooltip[] = L"The keyboard shortcut is overriding a global system shortcut, this usually works fine but can have unforeseen consequences.";
+
+static int ZnapScale(int value) {
+    return MulDiv(value, (int)znap_settings_dpi, 96);
+}
+
+static void ZnapDeleteSettingsBrushes(void) {
+    if (znap_settings_background_brush != NULL) DeleteObject(znap_settings_background_brush);
+    if (znap_settings_surface_brush != NULL) DeleteObject(znap_settings_surface_brush);
+    if (znap_settings_tooltip_brush != NULL) DeleteObject(znap_settings_tooltip_brush);
+    znap_settings_background_brush = NULL;
+    znap_settings_surface_brush = NULL;
+    znap_settings_tooltip_brush = NULL;
+}
+
+static BOOL CALLBACK ZnapApplyThemeToChild(HWND control, LPARAM unused) {
+    (void)unused;
+    WCHAR class_name[32] = {0};
+    GetClassNameW(control, class_name, ARRAYSIZE(class_name));
+    if (lstrcmpiW(class_name, L"Button") == 0 || lstrcmpiW(class_name, L"Edit") == 0) {
+        if (znap_settings_high_contrast) SetWindowTheme(control, NULL, NULL);
+        else SetWindowTheme(control, znap_settings_dark ? L"DarkMode_Explorer" : L"Explorer", NULL);
+    }
+    return TRUE;
+}
+
+static void ZnapRefreshSettingsTheme(HWND window) {
+    ZnapDeleteSettingsBrushes();
+    znap_settings_high_contrast = ZnapHighContrastEnabled();
+    znap_settings_dark = !znap_settings_high_contrast && ZnapDarkModeEnabled();
+    if (znap_settings_high_contrast) {
+        znap_settings_background_color = GetSysColor(COLOR_BTNFACE);
+        znap_settings_surface_color = GetSysColor(COLOR_WINDOW);
+        znap_settings_text_color = GetSysColor(COLOR_WINDOWTEXT);
+        znap_settings_tooltip_color = GetSysColor(COLOR_INFOBK);
+    } else if (znap_settings_dark) {
+        znap_settings_background_color = RGB(32, 32, 32);
+        znap_settings_surface_color = RGB(45, 45, 45);
+        znap_settings_text_color = RGB(243, 243, 243);
+        znap_settings_tooltip_color = RGB(48, 48, 48);
+    } else {
+        znap_settings_background_color = RGB(243, 243, 243);
+        znap_settings_surface_color = RGB(255, 255, 255);
+        znap_settings_text_color = RGB(24, 24, 24);
+        znap_settings_tooltip_color = RGB(255, 255, 225);
+    }
+    znap_settings_background_brush = CreateSolidBrush(znap_settings_background_color);
+    znap_settings_surface_brush = CreateSolidBrush(znap_settings_surface_color);
+    znap_settings_tooltip_brush = CreateSolidBrush(znap_settings_tooltip_color);
+    ZnapApplyWindowChrome(window);
+    EnumChildWindows(window, ZnapApplyThemeToChild, 0);
+    RedrawWindow(window, NULL, NULL, RDW_INVALIDATE | RDW_ALLCHILDREN | RDW_ERASE | RDW_FRAME);
+}
+
+static BOOL CALLBACK ZnapSetMessageFontOnChild(HWND control, LPARAM font) {
+    SendMessageW(control, WM_SETFONT, (WPARAM)font, TRUE);
+    return TRUE;
+}
+
+static void ZnapRefreshSettingsFonts(HWND window) {
+    NONCLIENTMETRICSW metrics = {0};
+    metrics.cbSize = sizeof(metrics);
+    if (!SystemParametersInfoForDpi(SPI_GETNONCLIENTMETRICS, sizeof(metrics), &metrics, 0, znap_settings_dpi)) {
+        if (!SystemParametersInfoW(SPI_GETNONCLIENTMETRICS, sizeof(metrics), &metrics, 0)) return;
+        const UINT system_dpi = GetDpiForSystem();
+        if (system_dpi != 0 && system_dpi != znap_settings_dpi) {
+            metrics.lfMessageFont.lfHeight = MulDiv(metrics.lfMessageFont.lfHeight, (int)znap_settings_dpi, (int)system_dpi);
+            metrics.lfMessageFont.lfWidth = MulDiv(metrics.lfMessageFont.lfWidth, (int)znap_settings_dpi, (int)system_dpi);
+        }
+    }
+    HFONT message_font = CreateFontIndirectW(&metrics.lfMessageFont);
+    LOGFONTW warning_font_info = metrics.lfMessageFont;
+    warning_font_info.lfHeight = ZnapScale(-20);
+    warning_font_info.lfWeight = FW_BOLD;
+    lstrcpynW(warning_font_info.lfFaceName, L"Segoe UI Symbol", LF_FACESIZE);
+    HFONT warning_font = CreateFontIndirectW(&warning_font_info);
+    if (message_font != NULL) {
+        EnumChildWindows(window, ZnapSetMessageFontOnChild, (LPARAM)message_font);
+        if (znap_settings_tooltip != NULL) {
+            SendMessageW(znap_settings_tooltip, WM_SETFONT, (WPARAM)message_font, TRUE);
+        }
+        if (znap_settings_font != NULL) DeleteObject(znap_settings_font);
+        znap_settings_font = message_font;
+    }
+    if (warning_font != NULL) {
+        for (UINT row = 0; row < znap_settings_row_count; row++) {
+            if (znap_settings_rows[row].warning != NULL) {
+                SendMessageW(znap_settings_rows[row].warning, WM_SETFONT, (WPARAM)warning_font, TRUE);
+            }
+        }
+        if (znap_warning_font != NULL) DeleteObject(znap_warning_font);
+        znap_warning_font = warning_font;
+    }
+}
+
+typedef struct ZnapDpiScaleContext {
+    HWND parent;
+    UINT old_dpi;
+    UINT new_dpi;
+} ZnapDpiScaleContext;
+
+static BOOL CALLBACK ZnapScaleChildForDpi(HWND control, LPARAM lparam) {
+    ZnapDpiScaleContext *context = (ZnapDpiScaleContext *)lparam;
+    RECT bounds;
+    if (!GetWindowRect(control, &bounds)) return TRUE;
+    MapWindowPoints(HWND_DESKTOP, context->parent, (POINT *)&bounds, 2);
+    const int left = MulDiv(bounds.left, (int)context->new_dpi, (int)context->old_dpi);
+    const int top = MulDiv(bounds.top, (int)context->new_dpi, (int)context->old_dpi);
+    const int width = MulDiv(bounds.right - bounds.left, (int)context->new_dpi, (int)context->old_dpi);
+    const int height = MulDiv(bounds.bottom - bounds.top, (int)context->new_dpi, (int)context->old_dpi);
+    SetWindowPos(control, NULL, left, top, width, height, SWP_NOZORDER | SWP_NOACTIVATE);
+    return TRUE;
+}
 
 static void ZnapDeactivateCollisionTooltip(UINT row) {
     if (znap_settings_tooltip == NULL) return;
@@ -362,16 +520,16 @@ static void ZnapDeactivateCollisionTooltip(UINT row) {
 
 static void ZnapShowCollisionTooltip(UINT row, POINT cursor) {
     if (znap_settings_tooltip == NULL || row >= znap_settings_row_count) return;
-    const int width = 500;
-    const int height = 48;
-    int x = cursor.x + 12;
-    int y = cursor.y + 20;
+    const int width = ZnapScale(500);
+    const int height = ZnapScale(48);
+    int x = cursor.x + ZnapScale(12);
+    int y = cursor.y + ZnapScale(20);
     MONITORINFO monitor_info = {0};
     monitor_info.cbSize = sizeof(monitor_info);
     HMONITOR monitor = MonitorFromPoint(cursor, MONITOR_DEFAULTTONEAREST);
     if (GetMonitorInfoW(monitor, &monitor_info)) {
         if (x + width > monitor_info.rcWork.right) x = monitor_info.rcWork.right - width;
-        if (y + height > monitor_info.rcWork.bottom) y = cursor.y - height - 8;
+        if (y + height > monitor_info.rcWork.bottom) y = cursor.y - height - ZnapScale(8);
     }
     SetWindowPos(znap_settings_tooltip, HWND_TOPMOST, x, y, width, height, SWP_NOACTIVATE | SWP_SHOWWINDOW);
     InterlockedExchange(&znap_active_tooltip_row, (LONG)row);
@@ -478,13 +636,24 @@ static const WCHAR *ZnapActionLabel(UINT action) {
 }
 
 static HWND ZnapCreateSettingsControl(DWORD ex_style, const WCHAR *class_name, const WCHAR *text, DWORD style, int x, int y, int width, int height, HWND parent, UINT id) {
-    HWND control = CreateWindowExW(ex_style, class_name, text, WS_CHILD | WS_VISIBLE | style, x, y, width, height, parent, (HMENU)(UINT_PTR)id, GetModuleHandleW(NULL), NULL);
+    HWND control = CreateWindowExW(ex_style, class_name, text, WS_CHILD | WS_VISIBLE | style,
+        ZnapScale(x), ZnapScale(y), ZnapScale(width), ZnapScale(height),
+        parent, (HMENU)(UINT_PTR)id, GetModuleHandleW(NULL), NULL);
     if (control != NULL && znap_settings_font != NULL) SendMessageW(control, WM_SETFONT, (WPARAM)znap_settings_font, TRUE);
+    if (control != NULL) ZnapApplyThemeToChild(control, 0);
     return control;
 }
 
 static LRESULT CALLBACK ZnapSettingsProc(HWND window, UINT message, WPARAM wparam, LPARAM lparam) {
     switch (message) {
+        case WM_ERASEBKGND: {
+            RECT client;
+            GetClientRect(window, &client);
+            HBRUSH brush = znap_settings_background_brush != NULL
+                ? znap_settings_background_brush : GetSysColorBrush(COLOR_BTNFACE);
+            FillRect((HDC)wparam, &client, brush);
+            return 1;
+        }
         case WM_COMMAND: {
             const UINT id = LOWORD(wparam);
             const UINT notification = HIWORD(wparam);
@@ -511,37 +680,65 @@ static LRESULT CALLBACK ZnapSettingsProc(HWND window, UINT message, WPARAM wpara
         case WM_CTLCOLORSTATIC: {
             HWND control = (HWND)lparam;
             if (control == znap_settings_tooltip) {
-                SetTextColor((HDC)wparam, GetSysColor(COLOR_INFOTEXT));
-                SetBkColor((HDC)wparam, GetSysColor(COLOR_INFOBK));
-                return (LRESULT)GetSysColorBrush(COLOR_INFOBK);
+                SetTextColor((HDC)wparam, znap_settings_dark ? znap_settings_text_color : GetSysColor(COLOR_INFOTEXT));
+                SetBkColor((HDC)wparam, znap_settings_tooltip_color);
+                return (LRESULT)(znap_settings_tooltip_brush != NULL
+                    ? znap_settings_tooltip_brush : GetSysColorBrush(COLOR_INFOBK));
             }
             for (UINT row = 0; row < znap_settings_row_count; row++) {
                 if (znap_settings_rows[row].warning == control) {
-                    SetTextColor((HDC)wparam, RGB(215, 160, 0));
+                    SetTextColor((HDC)wparam, znap_settings_high_contrast
+                        ? GetSysColor(COLOR_HIGHLIGHT) : (znap_settings_dark ? RGB(255, 185, 0) : RGB(180, 125, 0)));
                     SetBkMode((HDC)wparam, TRANSPARENT);
-                    return (LRESULT)GetStockObject(NULL_BRUSH);
+                    return (LRESULT)(znap_settings_background_brush != NULL
+                        ? znap_settings_background_brush : GetSysColorBrush(COLOR_BTNFACE));
                 }
                 if (znap_settings_rows[row].edit == control) {
-                    SetTextColor((HDC)wparam, RGB(0, 0, 0));
-                    SetBkColor((HDC)wparam, RGB(255, 255, 255));
-                    return (LRESULT)GetStockObject(WHITE_BRUSH);
+                    SetTextColor((HDC)wparam, znap_settings_text_color);
+                    SetBkColor((HDC)wparam, znap_settings_surface_color);
+                    return (LRESULT)(znap_settings_surface_brush != NULL
+                        ? znap_settings_surface_brush : GetSysColorBrush(COLOR_WINDOW));
                 }
             }
-            break;
+            SetTextColor((HDC)wparam, znap_settings_text_color);
+            SetBkColor((HDC)wparam, znap_settings_background_color);
+            return (LRESULT)(znap_settings_background_brush != NULL
+                ? znap_settings_background_brush : GetSysColorBrush(COLOR_BTNFACE));
         }
         case WM_CTLCOLOREDIT:
-            SetTextColor((HDC)wparam, RGB(0, 0, 0));
-            SetBkColor((HDC)wparam, RGB(255, 255, 255));
-            return (LRESULT)GetStockObject(WHITE_BRUSH);
+            SetTextColor((HDC)wparam, znap_settings_text_color);
+            SetBkColor((HDC)wparam, znap_settings_surface_color);
+            return (LRESULT)(znap_settings_surface_brush != NULL
+                ? znap_settings_surface_brush : GetSysColorBrush(COLOR_WINDOW));
+        case WM_THEMECHANGED:
+        case WM_SETTINGCHANGE:
+            ZnapRefreshSettingsTheme(window);
+            ZnapRefreshSettingsFonts(window);
+            return 0;
+        case WM_DPICHANGED: {
+            const UINT new_dpi = LOWORD(wparam);
+            const UINT old_dpi = znap_settings_dpi;
+            RECT *suggested = (RECT *)lparam;
+            znap_settings_dpi = new_dpi;
+            SetWindowPos(window, NULL, suggested->left, suggested->top,
+                suggested->right - suggested->left, suggested->bottom - suggested->top,
+                SWP_NOZORDER | SWP_NOACTIVATE);
+            if (old_dpi != 0 && new_dpi != old_dpi) {
+                ZnapDpiScaleContext context = { window, old_dpi, new_dpi };
+                EnumChildWindows(window, ZnapScaleChildForDpi, (LPARAM)&context);
+                ZnapRefreshSettingsFonts(window);
+            }
+            return 0;
+        }
         case WM_TIMER:
             if (wparam == ZNAP_TOOLTIP_TIMER) ZnapPollCollisionTooltip();
             return 0;
         case WM_GETMINMAXINFO: {
             MINMAXINFO *limits = (MINMAXINFO *)lparam;
-            limits->ptMinTrackSize.x = ZNAP_SETTINGS_WIDTH;
-            limits->ptMinTrackSize.y = znap_settings_height;
-            limits->ptMaxTrackSize.x = ZNAP_SETTINGS_WIDTH;
-            limits->ptMaxTrackSize.y = znap_settings_height;
+            limits->ptMinTrackSize.x = ZnapScale(ZNAP_SETTINGS_WIDTH);
+            limits->ptMinTrackSize.y = ZnapScale(znap_settings_height);
+            limits->ptMaxTrackSize.x = ZnapScale(ZNAP_SETTINGS_WIDTH);
+            limits->ptMaxTrackSize.y = ZnapScale(znap_settings_height);
             return 0;
         }
         case ZNAP_CAPTURE_KEYMAP: {
@@ -579,6 +776,11 @@ static LRESULT CALLBACK ZnapSettingsProc(HWND window, UINT message, WPARAM wpara
                 DeleteObject(znap_warning_font);
                 znap_warning_font = NULL;
             }
+            if (znap_settings_font != NULL) {
+                DeleteObject(znap_settings_font);
+                znap_settings_font = NULL;
+            }
+            ZnapDeleteSettingsBrushes();
             znap_settings_window = NULL;
             znap_settings_tooltip = NULL;
             znap_settings_row_count = 0;
@@ -597,7 +799,7 @@ static void ZnapEnsureSettingsClass(HINSTANCE instance) {
     window_class.hIcon = LoadIconW(instance, MAKEINTRESOURCEW(1));
     window_class.hIconSm = window_class.hIcon;
     window_class.hCursor = LoadCursorW(NULL, IDC_ARROW);
-    window_class.hbrBackground = (HBRUSH)(COLOR_BTNFACE + 1);
+    window_class.hbrBackground = NULL;
     window_class.lpszClassName = ZNAP_SETTINGS_CLASS;
     RegisterClassExW(&window_class);
 }
@@ -609,17 +811,27 @@ void ZnapShowSettingsDialog(HINSTANCE instance, HWND owner, const ZnapKeymapRow 
         return;
     }
     if (row_count > ZNAP_MAX_KEYMAPS) row_count = ZNAP_MAX_KEYMAPS;
+    INITCOMMONCONTROLSEX common_controls = { sizeof(common_controls), ICC_STANDARD_CLASSES };
+    InitCommonControlsEx(&common_controls);
     znap_settings_height = show_snap_warning ? ZNAP_SETTINGS_HEIGHT_WITH_SNAP : ZNAP_SETTINGS_HEIGHT_SHORTCUTS_ONLY;
+    znap_settings_dpi = GetDpiForSystem();
+    if (znap_settings_dpi == 0) znap_settings_dpi = 96;
     ZnapEnsureSettingsClass(instance);
-    znap_settings_font = (HFONT)GetStockObject(DEFAULT_GUI_FONT);
-    znap_warning_font = CreateFontW(-20, 0, 0, 0, FW_BOLD, FALSE, FALSE, FALSE, DEFAULT_CHARSET,
-        OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY, DEFAULT_PITCH | FF_DONTCARE, L"Segoe UI Symbol");
     znap_settings_window = CreateWindowExW(WS_EX_DLGMODALFRAME, ZNAP_SETTINGS_CLASS, L"Settings", WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU,
-        CW_USEDEFAULT, CW_USEDEFAULT, ZNAP_SETTINGS_WIDTH, znap_settings_height, owner, NULL, instance, NULL);
+        CW_USEDEFAULT, CW_USEDEFAULT, ZnapScale(ZNAP_SETTINGS_WIDTH), ZnapScale(znap_settings_height), owner, NULL, instance, NULL);
     if (znap_settings_window == NULL) return;
+    const UINT window_dpi = GetDpiForWindow(znap_settings_window);
+    if (window_dpi != 0 && window_dpi != znap_settings_dpi) {
+        znap_settings_dpi = window_dpi;
+        SetWindowPos(znap_settings_window, NULL, 0, 0,
+            ZnapScale(ZNAP_SETTINGS_WIDTH), ZnapScale(znap_settings_height),
+            SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE);
+    }
     znap_settings_row_count = row_count;
+    ZnapRefreshSettingsTheme(znap_settings_window);
+    ZnapRefreshSettingsFonts(znap_settings_window);
     znap_settings_tooltip = CreateWindowExW(WS_EX_TOPMOST | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE, L"STATIC", znap_collision_tooltip,
-        WS_POPUP | WS_BORDER | SS_LEFT, 0, 0, 500, 48, znap_settings_window, NULL, instance, NULL);
+        WS_POPUP | WS_BORDER | SS_LEFT, 0, 0, ZnapScale(500), ZnapScale(48), znap_settings_window, NULL, instance, NULL);
     if (znap_settings_tooltip != NULL) {
         SendMessageW(znap_settings_tooltip, WM_SETFONT, (WPARAM)znap_settings_font, TRUE);
     }
