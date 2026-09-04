@@ -39,7 +39,12 @@ When Windows window snapping is enabled, the dialog also provides a warning and 
 
 ## Run on startup
 
-Select **Run on startup** from Znap's notification-area menu to toggle automatic launch when the current Windows user signs in. A check mark beside the menu item indicates that automatic launch is enabled. Selecting it again disables automatic launch. Windows asks for administrator approval when this setting is changed; afterward, Task Scheduler starts Znap with the current user's highest available privileges at sign-in.
+The notification-area menu provides two startup modes:
+
+- **Run on startup** launches Znap with normal user privileges through the current user's startup registry entry. This mode does not require administrator approval.
+- **Run on startup (as administrator)** launches Znap with the current user's highest available privileges through Task Scheduler. Windows asks for administrator approval when this setting is changed.
+
+The modes are mutually exclusive. Administrator startup takes precedence and temporarily disables the normal startup option until it is turned off. The administrator task waits briefly after sign-in for Explorer's notification area to become available.
 
 ![Znap notification-area menu](assets/tray_menu.png)
 
