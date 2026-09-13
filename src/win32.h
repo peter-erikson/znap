@@ -27,7 +27,7 @@ typedef struct ZnapKeymapRow {
     UINT key;
 } ZnapKeymapRow;
 
-void ZnapShowSettingsDialog(HINSTANCE instance, HWND owner, const ZnapKeymapRow *rows, UINT row_count, UINT general_count, BOOL show_snap_warning, BOOL startup_enabled, BOOL admin_startup_enabled, UINT edge_cycles, UINT corner_cycles, UINT center_cycles, UINT default_edge_cycle_width, UINT default_corner_cycle_width, UINT default_center_cycle_width);
+void ZnapShowSettingsDialog(HINSTANCE instance, HWND owner, const ZnapKeymapRow *rows, UINT row_count, UINT general_count, BOOL show_snap_warning, BOOL startup_enabled, BOOL admin_startup_enabled, UINT edge_cycles, UINT corner_cycles, UINT center_cycles, UINT default_edge_cycle_width, UINT default_corner_cycle_width, UINT default_center_cycle_width, BOOL smart_edge_fill, BOOL smart_corner_fill);
 BOOL ZnapSettingsRecording(void);
 void ZnapRecordKeymap(UINT modifiers, UINT key);
 
@@ -36,3 +36,4 @@ BOOL ZnapUpdateKeymap(UINT index, UINT modifiers, UINT key);
 BOOL ZnapSetStartupOption(UINT option, BOOL enabled);
 BOOL ZnapUpdateCycleWidth(UINT group, UINT width, BOOL enabled);
 BOOL ZnapUpdateDefaultCycleWidth(UINT group, UINT width);
+BOOL ZnapUpdateSmartFill(UINT group, BOOL enabled);

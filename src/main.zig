@@ -34,6 +34,17 @@ const mod_control: u32 = 0x0002;
 const mod_shift: u32 = 0x0004;
 const mod_win: u32 = 0x0008;
 
+const SnapIdentity = struct {
+    window: usize,
+    action: settings.Action,
+};
+
+const SnapTransition = enum {
+    repeat,
+    window_changed,
+    method_changed,
+};
+
 var message_window: c.HWND = null;
 var keyboard_hook: c.HHOOK = null;
 var keyboard_hook_ready: c.HANDLE = null;
@@ -49,6 +60,9 @@ var center_cycle_mask: u8 = settings.default_cycle_mask;
 var default_edge_cycle_width: settings.CycleWidth = settings.default_cycle_width;
 var default_corner_cycle_width: settings.CycleWidth = settings.default_cycle_width;
 var default_center_cycle_width: settings.CycleWidth = settings.default_cycle_width;
+var smart_edge_fill = true;
+var smart_corner_fill = true;
+var last_snap: ?SnapIdentity = null;
 var app_io: std.Io = undefined;
 var app_allocator: std.mem.Allocator = undefined;
 var settings_file_path: []const u8 = &.{};
@@ -119,6 +133,8 @@ pub fn main(init: std.process.Init) !void {
     default_edge_cycle_width = loaded_settings.default_edge_cycle_width;
     default_corner_cycle_width = loaded_settings.default_corner_cycle_width;
     default_center_cycle_width = loaded_settings.default_center_cycle_width;
+    smart_edge_fill = loaded_settings.smart_edge_fill;
+    smart_corner_fill = loaded_settings.smart_corner_fill;
     settings_file_path = loaded_settings.path;
 
     const instance = c.GetModuleHandleW(null);
@@ -493,12 +509,16 @@ const edge_cycles = [4][settings.cycle_width_count]geometry.Placement{
     .{ .bottom_one_quarter, .bottom_one_third, .bottom_half, .bottom_two_thirds, .bottom_three_quarters },
 };
 
+const edge_snap_actions = [4]settings.Action{ .edge_left, .edge_right, .edge_top, .edge_bottom };
+
 const corner_cycles = [4][settings.cycle_width_count]geometry.Placement{
     .{ .top_left_one_quarter, .top_left_one_third, .top_left_half, .top_left_two_thirds, .top_left_three_quarters },
     .{ .top_right_one_quarter, .top_right_one_third, .top_right_half, .top_right_two_thirds, .top_right_three_quarters },
     .{ .bottom_left_one_quarter, .bottom_left_one_third, .bottom_left_half, .bottom_left_two_thirds, .bottom_left_three_quarters },
     .{ .bottom_right_one_quarter, .bottom_right_one_third, .bottom_right_half, .bottom_right_two_thirds, .bottom_right_three_quarters },
 };
+
+const corner_snap_actions = [4]settings.Action{ .corner_top_left, .corner_top_right, .corner_bottom_left, .corner_bottom_right };
 
 const center_cycles = [settings.cycle_width_count]geometry.Placement{
     .center_one_quarter,
@@ -520,29 +540,336 @@ fn configuredCycle(all: *const [settings.cycle_width_count]geometry.Placement, m
     return storage[0..count];
 }
 
+const SmartFillCandidate = struct {
+    placements: *const [settings.cycle_width_count]geometry.Placement,
+    mask: u8,
+    complement: enum { matching_width, half, centered_sides },
+};
+
+const SmartFillRequest = struct {
+    target: *const [settings.cycle_width_count]geometry.Placement,
+    target_mask: u8,
+    candidates: [4]SmartFillCandidate,
+};
+
+const SmartFillCapture = struct {
+    ignored: c.HWND,
+    monitor: c.HMONITOR,
+    display: geometry.Rect,
+    request: SmartFillRequest,
+    occluders: [occluder_capacity]c.RECT = undefined,
+    occluder_count: usize = 0,
+    placement: ?geometry.Placement = null,
+};
+
+const complementary_widths = [settings.cycle_width_count]usize{ 4, 3, 2, 1, 0 };
+
+fn complementarySmartPlacement(candidate: geometry.Rect, display: geometry.Rect, request: SmartFillRequest) ?geometry.Placement {
+    for (request.candidates) |candidate_set| {
+        for (0..settings.cycle_width_count) |width| {
+            const bit = @as(u8, 1) << @intCast(width);
+            if (candidate_set.mask & bit == 0) continue;
+            if (!geometry.approximatelyEqual(candidate, geometry.place(candidate_set.placements[width], display, candidate), snapping_match_tolerance)) continue;
+            const complement: usize = switch (candidate_set.complement) {
+                .matching_width => complementary_widths[width],
+                .half => 2,
+                .centered_sides => switch (width) {
+                    1 => 1,
+                    2 => 0,
+                    else => continue,
+                },
+            };
+            if (request.target_mask & (@as(u8, 1) << @intCast(complement)) != 0) {
+                return request.target[complement];
+            }
+        }
+    }
+    return null;
+}
+
+fn overlapsSmartFillTargetBand(candidate: geometry.Rect, placement: geometry.Placement, display: geometry.Rect) bool {
+    const target = geometry.place(placement, display, candidate);
+    if (target.width() == display.width()) {
+        return @min(candidate.right, target.right) - @max(candidate.left, target.left) > snapping_match_tolerance;
+    }
+    return @min(candidate.bottom, target.bottom) - @max(candidate.top, target.top) > snapping_match_tolerance;
+}
+
+fn smartFillExtent(placement: geometry.Placement, display: geometry.Rect) i32 {
+    const target = geometry.place(placement, display, undefined);
+    return if (target.width() == display.width()) target.height() else target.width();
+}
+
+fn narrowerSmartPlacement(current: ?geometry.Placement, candidate: geometry.Placement, display: geometry.Rect) geometry.Placement {
+    const previous = current orelse return candidate;
+    return if (smartFillExtent(candidate, display) < smartFillExtent(previous, display)) candidate else previous;
+}
+
+fn smartEdgeRequest(index: usize) SmartFillRequest {
+    const opposite_edge = ([4]usize{ 1, 0, 3, 2 })[index];
+    const corner_directions = switch (index) {
+        0 => [2]usize{ 1, 3 },
+        1 => [2]usize{ 0, 2 },
+        2 => [2]usize{ 2, 3 },
+        3 => [2]usize{ 0, 1 },
+        else => unreachable,
+    };
+    return .{
+        .target = &edge_cycles[index],
+        .target_mask = edge_cycle_mask,
+        .candidates = .{
+            .{ .placements = &edge_cycles[opposite_edge], .mask = edge_cycle_mask, .complement = .matching_width },
+            .{ .placements = &corner_cycles[corner_directions[0]], .mask = corner_cycle_mask, .complement = if (index < 2) .matching_width else .half },
+            .{ .placements = &corner_cycles[corner_directions[1]], .mask = corner_cycle_mask, .complement = if (index < 2) .matching_width else .half },
+            .{ .placements = &center_cycles, .mask = if (index < 2) center_cycle_mask else 0, .complement = .centered_sides },
+        },
+    };
+}
+
+fn smartCornerRequest(index: usize) SmartFillRequest {
+    const opposite_edge: usize = if (index == 0 or index == 2) 1 else 0;
+    const opposite_corners = switch (index) {
+        0 => [2]usize{ 1, 3 },
+        1 => [2]usize{ 0, 2 },
+        2 => [2]usize{ 3, 1 },
+        3 => [2]usize{ 2, 0 },
+        else => unreachable,
+    };
+    return .{
+        .target = &corner_cycles[index],
+        .target_mask = corner_cycle_mask,
+        .candidates = .{
+            .{ .placements = &corner_cycles[opposite_corners[0]], .mask = corner_cycle_mask, .complement = .matching_width },
+            .{ .placements = &edge_cycles[opposite_edge], .mask = edge_cycle_mask, .complement = .matching_width },
+            .{ .placements = &corner_cycles[opposite_corners[1]], .mask = corner_cycle_mask, .complement = .matching_width },
+            .{ .placements = &center_cycles, .mask = center_cycle_mask, .complement = .centered_sides },
+        },
+    };
+}
+
+fn captureSmartFillWindow(hwnd: c.HWND, lparam: c.LPARAM) callconv(.c) c.BOOL {
+    const capture: *SmartFillCapture = @ptrFromInt(@as(usize, @bitCast(lparam)));
+    if (hwnd == capture.ignored or !isOccludingWindow(hwnd)) return c.TRUE;
+
+    var bounds: c.RECT = undefined;
+    if (!getVisibleWindowBounds(hwnd, &bounds)) return c.TRUE;
+    if (c.MonitorFromWindow(hwnd, c.MONITOR_DEFAULTTONEAREST) == capture.monitor and
+        isZonableWindow(hwnd) and
+        !isCovered(bounds, capture.occluders[0..capture.occluder_count]))
+    {
+        if (complementarySmartPlacement(fromWinRect(bounds), capture.display, capture.request)) |placement| {
+            if (overlapsSmartFillTargetBand(fromWinRect(bounds), placement, capture.display)) {
+                capture.placement = narrowerSmartPlacement(capture.placement, placement, capture.display);
+            }
+        }
+    }
+
+    if (capture.occluder_count == capture.occluders.len) return c.FALSE;
+    capture.occluders[capture.occluder_count] = bounds;
+    capture.occluder_count += 1;
+    return c.TRUE;
+}
+
+fn smartFillPlacement(hwnd: c.HWND, monitor: c.HMONITOR, display: geometry.Rect, request: SmartFillRequest) ?geometry.Placement {
+    var capture: SmartFillCapture = .{
+        .ignored = hwnd,
+        .monitor = monitor,
+        .display = display,
+        .request = request,
+    };
+    _ = c.EnumWindows(captureSmartFillWindow, @bitCast(@intFromPtr(&capture)));
+    return capture.placement;
+}
+
 test "configured cycle starts at the selected default width" {
     var configured: [settings.cycle_width_count]geometry.Placement = undefined;
     const cycle = configuredCycle(&edge_cycles[0], settings.default_cycle_mask, .@"1/2", &configured);
     try std.testing.expectEqualSlices(geometry.Placement, &.{ .left_half, .left_two_thirds, .left_one_third }, cycle);
 }
 
+test "smart fill chooses an enabled complementary width" {
+    const display: geometry.Rect = .{ .left = 0, .top = 0, .right = 1200, .bottom = 900 };
+    const request: SmartFillRequest = .{
+        .target = &edge_cycles[0],
+        .target_mask = settings.default_cycle_mask,
+        .candidates = .{
+            .{ .placements = &edge_cycles[1], .mask = settings.default_cycle_mask, .complement = .matching_width },
+            .{ .placements = &corner_cycles[1], .mask = settings.default_cycle_mask, .complement = .matching_width },
+            .{ .placements = &corner_cycles[3], .mask = settings.default_cycle_mask, .complement = .matching_width },
+            .{ .placements = &center_cycles, .mask = settings.default_cycle_mask, .complement = .centered_sides },
+        },
+    };
+    try std.testing.expectEqual(geometry.Placement.left_one_third, complementarySmartPlacement(
+        geometry.place(.right_two_thirds, display, undefined),
+        display,
+        request,
+    ));
+    try std.testing.expectEqual(@as(?geometry.Placement, null), complementarySmartPlacement(
+        geometry.place(.right_three_quarters, display, undefined),
+        display,
+        request,
+    ));
+    try std.testing.expectEqual(geometry.Placement.left_two_thirds, complementarySmartPlacement(
+        geometry.place(.top_right_one_third, display, undefined),
+        display,
+        request,
+    ));
+}
+
+test "smart fill uses the side space around a centered window" {
+    const display: geometry.Rect = .{ .left = 0, .top = 0, .right = 1200, .bottom = 900 };
+    const disabled: SmartFillCandidate = .{ .placements = &edge_cycles[0], .mask = 0, .complement = .matching_width };
+    const center_candidate: SmartFillCandidate = .{ .placements = &center_cycles, .mask = settings.default_cycle_mask, .complement = .centered_sides };
+    const edge_request: SmartFillRequest = .{
+        .target = &edge_cycles[0],
+        .target_mask = 0x1f,
+        .candidates = .{ center_candidate, disabled, disabled, disabled },
+    };
+    const corner_request: SmartFillRequest = .{
+        .target = &corner_cycles[0],
+        .target_mask = 0x1f,
+        .candidates = .{ center_candidate, disabled, disabled, disabled },
+    };
+    const centered_half = geometry.place(.center_half, display, undefined);
+
+    try std.testing.expectEqual(geometry.Placement.left_one_quarter, complementarySmartPlacement(centered_half, display, edge_request));
+    try std.testing.expectEqual(geometry.Placement.top_left_one_quarter, complementarySmartPlacement(centered_half, display, corner_request));
+}
+
+test "smart fill uses the narrowest free extent from multiple windows" {
+    const display: geometry.Rect = .{ .left = 0, .top = 0, .right = 1200, .bottom = 900 };
+    const disabled: SmartFillCandidate = .{ .placements = &edge_cycles[0], .mask = 0, .complement = .matching_width };
+    const request: SmartFillRequest = .{
+        .target = &edge_cycles[0],
+        .target_mask = 0x1f,
+        .candidates = .{
+            .{ .placements = &edge_cycles[1], .mask = 0x1f, .complement = .matching_width },
+            .{ .placements = &center_cycles, .mask = 0x1f, .complement = .centered_sides },
+            disabled,
+            disabled,
+        },
+    };
+    const right_quarter_fill = complementarySmartPlacement(geometry.place(.right_one_quarter, display, undefined), display, request).?;
+    const centered_half_fill = complementarySmartPlacement(geometry.place(.center_half, display, undefined), display, request).?;
+
+    try std.testing.expectEqual(geometry.Placement.left_three_quarters, right_quarter_fill);
+    try std.testing.expectEqual(geometry.Placement.left_one_quarter, centered_half_fill);
+    try std.testing.expectEqual(geometry.Placement.left_one_quarter, narrowerSmartPlacement(right_quarter_fill, centered_half_fill, display));
+}
+
+test "corner smart fill only uses windows in the destination row" {
+    const display: geometry.Rect = .{ .left = 0, .top = 0, .right = 1200, .bottom = 900 };
+    const request = smartCornerRequest(2);
+    const same_row = geometry.place(.bottom_right_one_third, display, undefined);
+    const other_row = geometry.place(.top_right_one_third, display, undefined);
+    const placement = complementarySmartPlacement(same_row, display, request).?;
+
+    try std.testing.expectEqual(geometry.Placement.bottom_left_two_thirds, placement);
+    try std.testing.expect(overlapsSmartFillTargetBand(same_row, placement, display));
+    try std.testing.expect(!overlapsSmartFillTargetBand(other_row, placement, display));
+}
+
+test "a fresh window snap tries smart fill before continuing its existing cycle" {
+    const display: geometry.Rect = .{ .left = 0, .top = 0, .right = 1200, .bottom = 900 };
+    const cycle = [_]geometry.Placement{ .left_half, .left_two_thirds, .left_one_third };
+    const current = geometry.place(.left_one_third, display, undefined);
+
+    try std.testing.expectEqual(
+        .left_two_thirds,
+        nextSnapPlacement(&cycle, current, display, .left_two_thirds, .window_changed),
+    );
+    try std.testing.expectEqual(
+        .left_half,
+        nextSnapPlacement(&cycle, current, display, .left_two_thirds, .repeat),
+    );
+    try std.testing.expectEqual(
+        .left_one_third,
+        nextSnapPlacement(&cycle, geometry.place(.right_one_third, display, undefined), display, .left_one_third, .window_changed),
+    );
+    try std.testing.expectEqual(
+        .left_half,
+        nextSnapPlacement(&cycle, current, display, .left_one_third, .window_changed),
+    );
+}
+
+test "switching corners applies smart fill even when the width is unchanged" {
+    const display: geometry.Rect = .{ .left = 0, .top = 0, .right = 1200, .bottom = 900 };
+    const cycle = [_]geometry.Placement{ .top_left_half, .top_left_two_thirds, .top_left_one_third };
+    const current = geometry.place(.bottom_left_one_third, display, undefined);
+
+    try std.testing.expectEqual(
+        .top_left_one_third,
+        nextSnapPlacement(&cycle, current, display, .top_left_one_third, .method_changed),
+    );
+
+    const bottom_right_cycle = [_]geometry.Placement{ .bottom_right_half, .bottom_right_two_thirds, .bottom_right_one_third };
+    try std.testing.expectEqual(
+        .bottom_right_two_thirds,
+        nextSnapPlacement(&bottom_right_cycle, geometry.place(.top_right_two_thirds, display, undefined), display, .bottom_right_two_thirds, .window_changed),
+    );
+}
+
+test "disabled smart fill cycles only an existing requested placement" {
+    const display: geometry.Rect = .{ .left = 0, .top = 0, .right = 1200, .bottom = 900 };
+    const cycle = [_]geometry.Placement{ .top_left_half, .top_left_two_thirds, .top_left_one_third };
+
+    try std.testing.expectEqual(
+        .top_left_half,
+        nextPlacementWithoutSmartFill(&cycle, geometry.place(.bottom_left_two_thirds, display, undefined), display),
+    );
+    try std.testing.expectEqual(
+        .top_left_one_third,
+        nextPlacementWithoutSmartFill(&cycle, geometry.place(.top_left_two_thirds, display, undefined), display),
+    );
+
+    const center_cycle = [_]geometry.Placement{ .center_half, .center_two_thirds, .center_one_third };
+    try std.testing.expectEqual(
+        .center_half,
+        nextPlacementWithoutSmartFill(&center_cycle, geometry.place(.left_half, display, undefined), display),
+    );
+    try std.testing.expectEqual(
+        .center_two_thirds,
+        nextPlacementWithoutSmartFill(&center_cycle, geometry.place(.center_half, display, undefined), display),
+    );
+}
+
+test "switching snap methods starts a fresh snap for the same window" {
+    const left: SnapIdentity = .{ .window = 1, .action = .edge_left };
+
+    try std.testing.expectEqual(SnapTransition.repeat, snapTransition(left, left));
+    try std.testing.expectEqual(SnapTransition.method_changed, snapTransition(left, .{ .window = 1, .action = .edge_right }));
+    try std.testing.expectEqual(SnapTransition.method_changed, snapTransition(.{ .window = 1, .action = .corner_top_left }, .{ .window = 1, .action = .corner_bottom_left }));
+    try std.testing.expectEqual(SnapTransition.window_changed, snapTransition(left, .{ .window = 2, .action = .edge_left }));
+}
+
 fn cycleEdge(index: usize) void {
     const hwnd = c.GetForegroundWindow();
     if (hwnd == null) return;
+    const snap: SnapIdentity = .{ .window = @intFromPtr(hwnd.?), .action = edge_snap_actions[index] };
     var configured: [settings.cycle_width_count]geometry.Placement = undefined;
-    const placement = nextWindowCyclePlacement(hwnd, configuredCycle(&edge_cycles[index], edge_cycle_mask, default_edge_cycle_width, &configured));
-    _ = resizeWindow(hwnd, placement);
+    const smart_request: ?SmartFillRequest = if (smart_edge_fill) smartEdgeRequest(index) else null;
+    const placement = nextWindowCyclePlacement(hwnd, configuredCycle(&edge_cycles[index], edge_cycle_mask, default_edge_cycle_width, &configured), smart_request, snapTransition(last_snap, snap));
+    if (resizeWindow(hwnd, placement)) last_snap = snap;
 }
 
 fn cycleCorner(index: usize) void {
     const hwnd = c.GetForegroundWindow();
     if (hwnd == null) return;
+    const snap: SnapIdentity = .{ .window = @intFromPtr(hwnd.?), .action = corner_snap_actions[index] };
     var configured: [settings.cycle_width_count]geometry.Placement = undefined;
-    const placement = nextWindowCyclePlacement(hwnd, configuredCycle(&corner_cycles[index], corner_cycle_mask, default_corner_cycle_width, &configured));
-    _ = resizeWindow(hwnd, placement);
+    const smart_request: ?SmartFillRequest = if (smart_corner_fill) smartCornerRequest(index) else null;
+    const placement = nextWindowCyclePlacement(hwnd, configuredCycle(&corner_cycles[index], corner_cycle_mask, default_corner_cycle_width, &configured), smart_request, snapTransition(last_snap, snap));
+    if (resizeWindow(hwnd, placement)) last_snap = snap;
 }
 
-fn nextWindowCyclePlacement(hwnd: c.HWND, cycle: []const geometry.Placement) geometry.Placement {
+fn snapTransition(previous: ?SnapIdentity, current: SnapIdentity) SnapTransition {
+    const last = previous orelse return .window_changed;
+    if (last.window != current.window) return .window_changed;
+    if (last.action != current.action) return .method_changed;
+    return .repeat;
+}
+
+fn nextWindowCyclePlacement(hwnd: c.HWND, cycle: []const geometry.Placement, smart_request: ?SmartFillRequest, transition: SnapTransition) geometry.Placement {
     const monitor = c.MonitorFromWindow(hwnd, c.MONITOR_DEFAULTTONEAREST);
     if (monitor == null) return cycle[0];
 
@@ -552,15 +879,42 @@ fn nextWindowCyclePlacement(hwnd: c.HWND, cycle: []const geometry.Placement) geo
 
     var bounds: c.RECT = undefined;
     if (!getVisibleWindowBounds(hwnd, &bounds)) return cycle[0];
-    return geometry.nextCyclePlacement(cycle, fromWinRect(bounds), fromWinRect(monitor_info.rcWork), snapping_match_tolerance);
+    const current = fromWinRect(bounds);
+    const display = fromWinRect(monitor_info.rcWork);
+    const request = smart_request orelse return nextPlacementWithoutSmartFill(cycle, current, display);
+    const smart_placement = if (transition != .repeat)
+        smartFillPlacement(hwnd, monitor, display, request)
+    else
+        null;
+    return nextSnapPlacement(cycle, current, display, smart_placement, transition);
+}
+
+fn nextSnapPlacement(cycle: []const geometry.Placement, current: geometry.Rect, display: geometry.Rect, smart_placement: ?geometry.Placement, transition: SnapTransition) geometry.Placement {
+    if (transition != .repeat) {
+        if (smart_placement) |placement| {
+            if (transition == .method_changed) return placement;
+            const smart_bounds = geometry.place(placement, display, current);
+            if (geometry.approximatelyEqual(current, smart_bounds, snapping_match_tolerance)) {
+                return geometry.nextCyclePlacement(cycle, smart_bounds, display, snapping_match_tolerance);
+            }
+            return placement;
+        }
+        return cycle[0];
+    }
+    return geometry.nextCyclePlacement(cycle, current, display, snapping_match_tolerance);
+}
+
+fn nextPlacementWithoutSmartFill(cycle: []const geometry.Placement, current: geometry.Rect, display: geometry.Rect) geometry.Placement {
+    return geometry.nextCyclePlacement(cycle, current, display, snapping_match_tolerance);
 }
 
 fn cycleCenter() void {
     const hwnd = c.GetForegroundWindow();
     if (hwnd == null) return;
+    const snap: SnapIdentity = .{ .window = @intFromPtr(hwnd.?), .action = .center };
     var configured: [settings.cycle_width_count]geometry.Placement = undefined;
-    const placement = nextWindowCyclePlacement(hwnd, configuredCycle(&center_cycles, center_cycle_mask, default_center_cycle_width, &configured));
-    _ = resizeWindow(hwnd, placement);
+    const placement = nextWindowCyclePlacement(hwnd, configuredCycle(&center_cycles, center_cycle_mask, default_center_cycle_width, &configured), null, snapTransition(last_snap, snap));
+    if (resizeWindow(hwnd, placement)) last_snap = snap;
 }
 
 fn toggleMaximize(hwnd: c.HWND) void {
@@ -742,6 +1096,8 @@ fn showSettingsDialog(owner: c.HWND) void {
         @intFromEnum(default_edge_cycle_width),
         @intFromEnum(default_corner_cycle_width),
         @intFromEnum(default_center_cycle_width),
+        if (smart_edge_fill) c.TRUE else c.FALSE,
+        if (smart_corner_fill) c.TRUE else c.FALSE,
     );
 }
 
@@ -784,6 +1140,8 @@ fn saveSettings() !void {
         default_edge_cycle_width,
         default_corner_cycle_width,
         default_center_cycle_width,
+        smart_edge_fill,
+        smart_corner_fill,
     );
 }
 
@@ -847,6 +1205,22 @@ pub export fn ZnapUpdateDefaultCycleWidth(group: c.UINT, width: c.UINT) c.BOOL {
     saveSettings() catch |err| {
         default_width.* = previous;
         std.log.err("failed to save default cycle width: {s}", .{@errorName(err)});
+        return c.FALSE;
+    };
+    return c.TRUE;
+}
+
+pub export fn ZnapUpdateSmartFill(group: c.UINT, enabled: c.BOOL) c.BOOL {
+    const setting = switch (group) {
+        0 => &smart_edge_fill,
+        1 => &smart_corner_fill,
+        else => return c.FALSE,
+    };
+    const previous = setting.*;
+    setting.* = enabled != 0;
+    saveSettings() catch |err| {
+        setting.* = previous;
+        std.log.err("failed to save smart fill setting: {s}", .{@errorName(err)});
         return c.FALSE;
     };
     return c.TRUE;

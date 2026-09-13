@@ -3,6 +3,7 @@ zig = '0.16.0'
 zls = '0.16.0'
 
 [tasks.rebuild]
+quiet = true
 description = 'Stop, rebuild, and restart Znap'
 shell = 'powershell -Command'
 run = '''

@@ -68,6 +68,8 @@ pub const Settings = struct {
     default_edge_cycle_width: ?CycleWidth = null,
     default_corner_cycle_width: ?CycleWidth = null,
     default_center_cycle_width: ?CycleWidth = null,
+    smart_edge_fill: ?bool = null,
+    smart_corner_fill: ?bool = null,
 };
 
 pub const LoadedKeymap = struct {
@@ -85,6 +87,8 @@ pub const LoadedSettings = struct {
     default_edge_cycle_width: CycleWidth,
     default_corner_cycle_width: CycleWidth,
     default_center_cycle_width: CycleWidth,
+    smart_edge_fill: bool,
+    smart_corner_fill: bool,
     path: []const u8,
 };
 
@@ -96,6 +100,8 @@ const ParsedSettings = struct {
     default_edge_cycle_width: CycleWidth,
     default_corner_cycle_width: CycleWidth,
     default_center_cycle_width: CycleWidth,
+    smart_edge_fill: bool,
+    smart_corner_fill: bool,
     migrated: bool,
 };
 
@@ -162,6 +168,8 @@ pub fn load(
                 .default_edge_cycle_width = default_cycle_width,
                 .default_corner_cycle_width = default_cycle_width,
                 .default_center_cycle_width = default_cycle_width,
+                .smart_edge_fill = true,
+                .smart_corner_fill = true,
                 .path = settings_path,
             };
         },
@@ -175,6 +183,8 @@ pub fn load(
                 .default_edge_cycle_width = default_cycle_width,
                 .default_corner_cycle_width = default_cycle_width,
                 .default_center_cycle_width = default_cycle_width,
+                .smart_edge_fill = true,
+                .smart_corner_fill = true,
                 .path = settings_path,
             };
         },
@@ -191,11 +201,13 @@ pub fn load(
             .default_edge_cycle_width = default_cycle_width,
             .default_corner_cycle_width = default_cycle_width,
             .default_center_cycle_width = default_cycle_width,
+            .smart_edge_fill = true,
+            .smart_corner_fill = true,
             .path = settings_path,
         };
     };
     if (parsed.migrated) {
-        save(io, allocator, settings_path, parsed.keymaps, parsed.edge_cycles, parsed.corner_cycles, parsed.center_cycles, parsed.default_edge_cycle_width, parsed.default_corner_cycle_width, parsed.default_center_cycle_width) catch |err| {
+        save(io, allocator, settings_path, parsed.keymaps, parsed.edge_cycles, parsed.corner_cycles, parsed.center_cycles, parsed.default_edge_cycle_width, parsed.default_corner_cycle_width, parsed.default_center_cycle_width, parsed.smart_edge_fill, parsed.smart_corner_fill) catch |err| {
             std.log.warn("could not save migrated settings file: {s}", .{@errorName(err)});
         };
     }
@@ -207,6 +219,8 @@ pub fn load(
         .default_edge_cycle_width = parsed.default_edge_cycle_width,
         .default_corner_cycle_width = parsed.default_corner_cycle_width,
         .default_center_cycle_width = parsed.default_center_cycle_width,
+        .smart_edge_fill = parsed.smart_edge_fill,
+        .smart_corner_fill = parsed.smart_corner_fill,
         .path = settings_path,
     };
 }
@@ -227,6 +241,8 @@ fn createDefaultFile(
             .default_edge_cycle_width = default_cycle_width,
             .default_corner_cycle_width = default_cycle_width,
             .default_center_cycle_width = default_cycle_width,
+            .smart_edge_fill = true,
+            .smart_corner_fill = true,
         },
         .{ .whitespace = .indent_2 },
     )});
@@ -318,6 +334,8 @@ fn parseSettings(allocator: std.mem.Allocator, contents: []const u8) !ParsedSett
     const default_edge_cycle_width = normalizedDefaultWidth(edge_cycles, parsed.value.default_edge_cycle_width);
     const default_corner_cycle_width = normalizedDefaultWidth(corner_cycles, parsed.value.default_corner_cycle_width);
     const default_center_cycle_width = normalizedDefaultWidth(center_cycles, parsed.value.default_center_cycle_width);
+    const smart_edge_fill = parsed.value.smart_edge_fill orelse true;
+    const smart_corner_fill = parsed.value.smart_corner_fill orelse true;
     return .{
         .keymaps = loaded,
         .edge_cycles = edge_cycles,
@@ -326,13 +344,17 @@ fn parseSettings(allocator: std.mem.Allocator, contents: []const u8) !ParsedSett
         .default_edge_cycle_width = default_edge_cycle_width,
         .default_corner_cycle_width = default_corner_cycle_width,
         .default_center_cycle_width = default_center_cycle_width,
+        .smart_edge_fill = smart_edge_fill,
+        .smart_corner_fill = smart_corner_fill,
         .migrated = active_count != parsed.value.keymaps.len or
             parsed.value.edge_cycles == null or
             parsed.value.corner_cycles == null or
             parsed.value.center_cycles == null or
             !defaultWidthIsValid(edge_cycles, parsed.value.default_edge_cycle_width) or
             !defaultWidthIsValid(corner_cycles, parsed.value.default_corner_cycle_width) or
-            !defaultWidthIsValid(center_cycles, parsed.value.default_center_cycle_width),
+            !defaultWidthIsValid(center_cycles, parsed.value.default_center_cycle_width) or
+            parsed.value.smart_edge_fill == null or
+            parsed.value.smart_corner_fill == null,
     };
 }
 
@@ -350,6 +372,8 @@ fn loadDefaultKeymaps(allocator: std.mem.Allocator) ![]LoadedKeymap {
             .default_edge_cycle_width = default_cycle_width,
             .default_corner_cycle_width = default_cycle_width,
             .default_center_cycle_width = default_cycle_width,
+            .smart_edge_fill = true,
+            .smart_corner_fill = true,
         },
         .{},
     )});
@@ -368,6 +392,8 @@ pub fn save(
     default_edge_cycle_width: CycleWidth,
     default_corner_cycle_width: CycleWidth,
     default_center_cycle_width: CycleWidth,
+    smart_edge_fill: bool,
+    smart_corner_fill: bool,
 ) !void {
     if (edge_cycles == 0 or corner_cycles == 0 or center_cycles == 0) return error.EmptyCycleWidths;
     if (!defaultWidthIsValid(edge_cycles, default_edge_cycle_width) or
@@ -416,6 +442,8 @@ pub fn save(
             .default_edge_cycle_width = default_edge_cycle_width,
             .default_corner_cycle_width = default_corner_cycle_width,
             .default_center_cycle_width = default_center_cycle_width,
+            .smart_edge_fill = smart_edge_fill,
+            .smart_corner_fill = smart_corner_fill,
         },
         .{ .whitespace = .indent_2 },
     )});
@@ -576,11 +604,13 @@ test "missing cycle widths migrate to defaults" {
     try std.testing.expectEqual(default_cycle_width, parsed.default_edge_cycle_width);
     try std.testing.expectEqual(default_cycle_width, parsed.default_corner_cycle_width);
     try std.testing.expectEqual(default_cycle_width, parsed.default_center_cycle_width);
+    try std.testing.expect(parsed.smart_edge_fill);
+    try std.testing.expect(parsed.smart_corner_fill);
 }
 
 test "parses configured cycle widths" {
     const parsed = try parseSettings(std.testing.allocator,
-        \\{"keymaps":[],"edge_cycles":["1/4","3/4"],"corner_cycles":["1/2"],"center_cycles":["1/3","2/3"],"default_edge_cycle_width":"3/4","default_corner_cycle_width":"1/2","default_center_cycle_width":"2/3"}
+        \\{"keymaps":[],"edge_cycles":["1/4","3/4"],"corner_cycles":["1/2"],"center_cycles":["1/3","2/3"],"default_edge_cycle_width":"3/4","default_corner_cycle_width":"1/2","default_center_cycle_width":"2/3","smart_edge_fill":false,"smart_corner_fill":true}
     );
     defer std.testing.allocator.free(parsed.keymaps);
     try std.testing.expect(!parsed.migrated);
@@ -590,6 +620,8 @@ test "parses configured cycle widths" {
     try std.testing.expectEqual(CycleWidth.@"3/4", parsed.default_edge_cycle_width);
     try std.testing.expectEqual(CycleWidth.@"1/2", parsed.default_corner_cycle_width);
     try std.testing.expectEqual(CycleWidth.@"2/3", parsed.default_center_cycle_width);
+    try std.testing.expect(!parsed.smart_edge_fill);
+    try std.testing.expect(parsed.smart_corner_fill);
 }
 
 test "disabled default cycle width migrates to first enabled width" {
