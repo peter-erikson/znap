@@ -458,10 +458,21 @@ static BOOL CALLBACK ZnapApplyThemeToChild(HWND control, LPARAM unused) {
     (void)unused;
     WCHAR class_name[32] = {0};
     GetClassNameW(control, class_name, ARRAYSIZE(class_name));
-    if (lstrcmpiW(class_name, L"Button") == 0 ||
+    if (lstrcmpiW(class_name, L"ComboBox") == 0) {
+        if (znap_settings_high_contrast) SetWindowTheme(control, NULL, NULL);
+        else SetWindowTheme(control, znap_settings_dark ? L"DarkMode_CFD" : L"Explorer", NULL);
+
+        COMBOBOXINFO info = {0};
+        info.cbSize = sizeof(info);
+        if (GetComboBoxInfo(control, &info) && info.hwndList != NULL) {
+            if (znap_settings_high_contrast) SetWindowTheme(info.hwndList, NULL, NULL);
+            else SetWindowTheme(info.hwndList, znap_settings_dark ? L"DarkMode_Explorer" : L"Explorer", NULL);
+            RedrawWindow(info.hwndList, NULL, NULL,
+                RDW_INVALIDATE | RDW_ERASE | RDW_FRAME | RDW_UPDATENOW);
+        }
+    } else if (lstrcmpiW(class_name, L"Button") == 0 ||
         lstrcmpiW(class_name, L"Edit") == 0 ||
         lstrcmpiW(class_name, L"ListBox") == 0 ||
-        lstrcmpiW(class_name, L"ComboBox") == 0 ||
         lstrcmpiW(class_name, ZNAP_SETTINGS_PAGE_CLASS) == 0) {
         if (znap_settings_high_contrast) SetWindowTheme(control, NULL, NULL);
         else SetWindowTheme(control, znap_settings_dark ? L"DarkMode_Explorer" : L"Explorer", NULL);
@@ -1031,6 +1042,7 @@ static LRESULT CALLBACK ZnapSettingsPageProc(HWND page, UINT message, WPARAM wpa
         case WM_CTLCOLORSTATIC:
         case WM_CTLCOLOREDIT:
         case WM_CTLCOLORBTN:
+        case WM_CTLCOLORLISTBOX:
             return SendMessageW(znap_settings_window, message, wparam, lparam);
         default:
             return DefWindowProcW(page, message, wparam, lparam);
@@ -1249,9 +1261,14 @@ static LRESULT CALLBACK ZnapSettingsProc(HWND window, UINT message, WPARAM wpara
                 ? znap_settings_surface_brush : GetSysColorBrush(COLOR_WINDOW));
         case WM_CTLCOLORLISTBOX:
             SetTextColor((HDC)wparam, znap_settings_text_color);
-            SetBkColor((HDC)wparam, znap_navigation_background_color);
-            return (LRESULT)(znap_navigation_background_brush != NULL
-                ? znap_navigation_background_brush : GetSysColorBrush(COLOR_BTNFACE));
+            if ((HWND)lparam == znap_settings_navigation) {
+                SetBkColor((HDC)wparam, znap_navigation_background_color);
+                return (LRESULT)(znap_navigation_background_brush != NULL
+                    ? znap_navigation_background_brush : GetSysColorBrush(COLOR_BTNFACE));
+            }
+            SetBkColor((HDC)wparam, znap_settings_surface_color);
+            return (LRESULT)(znap_settings_surface_brush != NULL
+                ? znap_settings_surface_brush : GetSysColorBrush(COLOR_WINDOW));
         case WM_THEMECHANGED:
         case WM_SETTINGCHANGE:
             ZnapRefreshSettingsTheme(window);
