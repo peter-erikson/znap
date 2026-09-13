@@ -1,3 +1,23 @@
 [tools]
 zig = '0.16.0'
 zls = '0.16.0'
+
+[tasks.rebuild]
+description = 'Stop, rebuild, and restart Znap'
+shell = 'powershell -Command'
+run = '''
+$ErrorActionPreference = 'Stop'
+
+$znapProcesses = Get-Process -Name 'Znap' -ErrorAction SilentlyContinue
+if ($znapProcesses) {
+    $znapProcesses | Stop-Process -Force
+    $znapProcesses | Wait-Process
+}
+
+zig build -Doptimize=ReleaseSafe
+if ($LASTEXITCODE -ne 0) {
+    exit $LASTEXITCODE
+}
+
+Start-Process -FilePath (Join-Path $PWD 'zig-out\bin\Znap.exe')
+'''
