@@ -660,8 +660,8 @@ fn handleTrayMessage(hwnd: c.HWND, lparam: c.LPARAM) void {
 fn showTrayMenu(hwnd: c.HWND) void {
     const menu = c.CreatePopupMenu() orelse return;
     defer _ = c.DestroyMenu(menu);
-    _ = c.AppendMenuW(menu, c.MF_STRING, menu_documentation, std.unicode.utf8ToUtf16LeStringLiteral("Documentation"));
     _ = c.AppendMenuW(menu, c.MF_STRING, menu_settings, std.unicode.utf8ToUtf16LeStringLiteral("Settings"));
+    _ = c.AppendMenuW(menu, c.MF_STRING, menu_documentation, std.unicode.utf8ToUtf16LeStringLiteral("Documentation"));
     _ = c.AppendMenuW(menu, c.MF_SEPARATOR, 0, null);
     _ = c.AppendMenuW(menu, c.MF_STRING, menu_quit, std.unicode.utf8ToUtf16LeStringLiteral("Quit"));
 
