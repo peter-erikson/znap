@@ -453,6 +453,8 @@ static BOOL CALLBACK ZnapApplyThemeToChild(HWND control, LPARAM unused) {
         if (znap_settings_high_contrast) SetWindowTheme(control, NULL, NULL);
         else SetWindowTheme(control, znap_settings_dark ? L"DarkMode_Explorer" : L"Explorer", NULL);
     }
+    RedrawWindow(control, NULL, NULL,
+        RDW_INVALIDATE | RDW_ERASE | RDW_FRAME | RDW_UPDATENOW);
     return TRUE;
 }
 
@@ -485,7 +487,12 @@ static void ZnapRefreshSettingsTheme(HWND window) {
     znap_settings_tooltip_brush = CreateSolidBrush(znap_settings_tooltip_color);
     ZnapApplyWindowChrome(window);
     EnumChildWindows(window, ZnapApplyThemeToChild, 0);
-    RedrawWindow(window, NULL, NULL, RDW_INVALIDATE | RDW_ALLCHILDREN | RDW_ERASE | RDW_FRAME);
+    if (znap_settings_tooltip != NULL) {
+        RedrawWindow(znap_settings_tooltip, NULL, NULL,
+            RDW_INVALIDATE | RDW_ERASE | RDW_FRAME | RDW_UPDATENOW);
+    }
+    RedrawWindow(window, NULL, NULL,
+        RDW_INVALIDATE | RDW_ALLCHILDREN | RDW_ERASE | RDW_FRAME | RDW_UPDATENOW);
 }
 
 static BOOL CALLBACK ZnapSetMessageFontOnChild(HWND control, LPARAM font) {
