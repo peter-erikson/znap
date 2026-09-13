@@ -363,6 +363,9 @@ void ZnapShowSnapWarning(HINSTANCE instance) {
 #define ZNAP_SETTINGS_NAVIGATION 3002
 #define ZNAP_STARTUP_NORMAL 3003
 #define ZNAP_STARTUP_ADMIN 3004
+#define ZNAP_CYCLE_WIDTH_BASE 3100
+#define ZNAP_CYCLE_GROUP_COUNT 3
+#define ZNAP_CYCLE_WIDTH_COUNT 5
 #define ZNAP_KEYMAP_CONTROL_BASE 4000
 #define ZNAP_ACTION_STORE_SNAPSHOT 10
 #define ZNAP_MAX_KEYMAPS 256
@@ -384,7 +387,7 @@ void ZnapShowSnapWarning(HINSTANCE instance) {
 #define ZNAP_TOOLTIP_HEIGHT 58
 #define ZNAP_CHECKBOX_SIZE 20
 #define ZNAP_CHECKBOX_HEIGHT 30
-#define ZNAP_MAX_SECTION_HEADERS 4
+#define ZNAP_MAX_SECTION_HEADERS 8
 
 typedef struct ZnapSettingsRowState {
     HWND edit;
@@ -401,6 +404,7 @@ static HWND znap_keybinds_page = NULL;
 static HWND znap_startup_normal = NULL;
 static HWND znap_startup_admin = NULL;
 static HWND znap_startup_info = NULL;
+static HWND znap_cycle_widths[ZNAP_CYCLE_GROUP_COUNT][ZNAP_CYCLE_WIDTH_COUNT] = {{NULL}};
 static int znap_general_content_height = 0;
 static int znap_keybinds_content_height = 0;
 static ZnapSettingsRowState znap_settings_rows[ZNAP_MAX_KEYMAPS];
@@ -1107,6 +1111,29 @@ static LRESULT CALLBACK ZnapSettingsProc(HWND window, UINT message, WPARAM wpara
                 }
                 return 0;
             }
+            if (id >= ZNAP_CYCLE_WIDTH_BASE && id < ZNAP_CYCLE_WIDTH_BASE + ZNAP_CYCLE_GROUP_COUNT * ZNAP_CYCLE_WIDTH_COUNT && notification == BN_CLICKED) {
+                const UINT option = id - ZNAP_CYCLE_WIDTH_BASE;
+                const UINT group = option / ZNAP_CYCLE_WIDTH_COUNT;
+                const UINT width = option % ZNAP_CYCLE_WIDTH_COUNT;
+                HWND checkbox = znap_cycle_widths[group][width];
+                const BOOL enabled = SendMessageW(checkbox, BM_GETCHECK, 0, 0) == BST_CHECKED;
+                if (!enabled) {
+                    UINT checked_count = 0;
+                    for (UINT index = 0; index < ZNAP_CYCLE_WIDTH_COUNT; index++) {
+                        if (SendMessageW(znap_cycle_widths[group][index], BM_GETCHECK, 0, 0) == BST_CHECKED) checked_count++;
+                    }
+                    if (checked_count == 0) {
+                        SendMessageW(checkbox, BM_SETCHECK, BST_CHECKED, 0);
+                        MessageBoxW(window, L"At least one width must remain enabled for each cycle.", L"Znap Settings", MB_OK | MB_ICONINFORMATION);
+                        return 0;
+                    }
+                }
+                if (!ZnapUpdateCycleWidth(group, width, enabled)) {
+                    SendMessageW(checkbox, BM_SETCHECK, enabled ? BST_UNCHECKED : BST_CHECKED, 0);
+                    MessageBoxW(window, L"The cycle widths could not be saved. The previous selection has been restored.", L"Znap Settings", MB_OK | MB_ICONERROR);
+                }
+                return 0;
+            }
             if (id == ZNAP_OPEN_WINDOWS_SETTINGS && notification == BN_CLICKED) {
                 ShellExecuteW(window, L"open", L"ms-settings:multitasking", NULL, NULL, SW_SHOWNORMAL);
                 return 0;
@@ -1248,6 +1275,7 @@ static LRESULT CALLBACK ZnapSettingsProc(HWND window, UINT message, WPARAM wpara
             znap_startup_normal = NULL;
             znap_startup_admin = NULL;
             znap_startup_info = NULL;
+            ZeroMemory(znap_cycle_widths, sizeof(znap_cycle_widths));
             znap_section_header_count = 0;
             znap_settings_tooltip = NULL;
             znap_settings_row_count = 0;
@@ -1280,7 +1308,7 @@ static void ZnapEnsureSettingsClass(HINSTANCE instance) {
     RegisterClassExW(&page_class);
 }
 
-void ZnapShowSettingsDialog(HINSTANCE instance, HWND owner, const ZnapKeymapRow *rows, UINT row_count, UINT general_count, BOOL show_snap_warning, BOOL startup_enabled, BOOL admin_startup_enabled) {
+void ZnapShowSettingsDialog(HINSTANCE instance, HWND owner, const ZnapKeymapRow *rows, UINT row_count, UINT general_count, BOOL show_snap_warning, BOOL startup_enabled, BOOL admin_startup_enabled, UINT edge_cycles, UINT corner_cycles, UINT center_cycles) {
     if (znap_settings_window != NULL) {
         ShowWindow(znap_settings_window, SW_RESTORE);
         SetForegroundWindow(znap_settings_window);
@@ -1353,7 +1381,26 @@ void ZnapShowSettingsDialog(HINSTANCE instance, HWND owner, const ZnapKeymapRow 
     if (znap_startup_info != NULL && znap_info_text_font != NULL) {
         SendMessageW(znap_startup_info, WM_SETFONT, (WPARAM)znap_info_text_font, TRUE);
     }
-    znap_general_content_height = startup_y + 176;
+    const WCHAR *cycle_titles[ZNAP_CYCLE_GROUP_COUNT] = {
+        L"Edge snap/cycle widths",
+        L"Corner snap/cycle widths",
+        L"Center cycle widths",
+    };
+    const WCHAR *cycle_labels[ZNAP_CYCLE_WIDTH_COUNT] = { L"1/4", L"1/3", L"1/2", L"2/3", L"3/4" };
+    const UINT cycle_masks[ZNAP_CYCLE_GROUP_COUNT] = { edge_cycles, corner_cycles, center_cycles };
+    int cycle_y = startup_y + 176;
+    for (UINT group = 0; group < ZNAP_CYCLE_GROUP_COUNT; group++) {
+        ZnapCreateSettingsControl(0, L"STATIC", L"", SS_ETCHEDHORZ, 20, cycle_y, 650, 2, znap_general_page, 0);
+        ZnapCreateSettingsHeader(cycle_titles[group], cycle_y + 20, znap_general_page);
+        for (UINT width = 0; width < ZNAP_CYCLE_WIDTH_COUNT; width++) {
+            const UINT id = ZNAP_CYCLE_WIDTH_BASE + group * ZNAP_CYCLE_WIDTH_COUNT + width;
+            HWND checkbox = ZnapCreateLargeCheckbox(cycle_labels[width], cycle_y + 56 + (int)width * 34, znap_general_page, id);
+            znap_cycle_widths[group][width] = checkbox;
+            SendMessageW(checkbox, BM_SETCHECK, cycle_masks[group] & (1u << width) ? BST_CHECKED : BST_UNCHECKED, 0);
+        }
+        cycle_y += 238;
+    }
+    znap_general_content_height = cycle_y;
 
     int y = 20;
     ZnapCreateSettingsHeader(L"Navigation", y, znap_keybinds_page);

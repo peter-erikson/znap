@@ -28,7 +28,7 @@ Successfully stored windows briefly wiggle down and back up as confirmation.
 
 ## Settings
 
-Select **Settings** from Znap's notification-area menu. The **General** page contains the startup and Windows snapping options. The **Keybinds** page lists the window-management and snapshot shortcut groups vertically and scrolls when they exceed the available space. Click a shortcut field, then press a non-modifier key while holding at least one modifier key (`Win`, `Ctrl`, `Alt`, or `Shift`) to record the new shortcut. Press `Backspace` while recording to clear a shortcut.
+Select **Settings** from Znap's notification-area menu. The **General** page contains the startup and Windows snapping options, plus configurable edge, corner, and center cycle widths. Each cycle must have at least one width enabled. The **Keybinds** page lists the window-management and snapshot shortcut groups vertically and scrolls when they exceed the available space. Click a shortcut field, then press a non-modifier key while holding at least one modifier key (`Win`, `Ctrl`, `Alt`, or `Shift`) to record the new shortcut. Press `Backspace` while recording to clear a shortcut.
 
 Changes are saved immediately to `%USERPROFILE%\.config\znap\settings.json` and loaded the next time Znap starts. Assigning a shortcut that is already used by another Znap action clears the duplicate assignment. A yellow warning icon identifies shortcuts that collide with a global Windows shortcut; hover over it for more information.
 

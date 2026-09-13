@@ -43,6 +43,9 @@ var suppressed_keys = [_]bool{false} ** 256;
 var tray_data: c.NOTIFYICONDATAW = std.mem.zeroes(c.NOTIFYICONDATAW);
 var maximize_states: window_states.Store = .{};
 var hotkeys: []settings.LoadedKeymap = &.{};
+var edge_cycle_mask: u8 = settings.default_cycle_mask;
+var corner_cycle_mask: u8 = settings.default_cycle_mask;
+var center_cycle_mask: u8 = settings.default_cycle_mask;
 var app_io: std.Io = undefined;
 var app_allocator: std.mem.Allocator = undefined;
 var settings_file_path: []const u8 = &.{};
@@ -107,6 +110,9 @@ pub fn main(init: std.process.Init) !void {
         return err;
     };
     hotkeys = loaded_settings.keymaps;
+    edge_cycle_mask = loaded_settings.edge_cycles;
+    corner_cycle_mask = loaded_settings.corner_cycles;
+    center_cycle_mask = loaded_settings.center_cycles;
     settings_file_path = loaded_settings.path;
 
     const instance = c.GetModuleHandleW(null);
@@ -474,37 +480,56 @@ fn isCovered(bounds: c.RECT, occluders: []const c.RECT) bool {
     return false;
 }
 
-const edge_cycles = [4][3]geometry.Placement{
-    .{ .left_half, .left_two_thirds, .left_one_third },
-    .{ .right_half, .right_two_thirds, .right_one_third },
-    .{ .top_half, .top_two_thirds, .top_one_third },
-    .{ .bottom_half, .bottom_two_thirds, .bottom_one_third },
+const edge_cycles = [4][settings.cycle_width_count]geometry.Placement{
+    .{ .left_one_quarter, .left_one_third, .left_half, .left_two_thirds, .left_three_quarters },
+    .{ .right_one_quarter, .right_one_third, .right_half, .right_two_thirds, .right_three_quarters },
+    .{ .top_one_quarter, .top_one_third, .top_half, .top_two_thirds, .top_three_quarters },
+    .{ .bottom_one_quarter, .bottom_one_third, .bottom_half, .bottom_two_thirds, .bottom_three_quarters },
 };
 
-const corner_cycles = [4][3]geometry.Placement{
-    .{ .top_left_half, .top_left_two_thirds, .top_left_one_third },
-    .{ .top_right_half, .top_right_two_thirds, .top_right_one_third },
-    .{ .bottom_left_half, .bottom_left_two_thirds, .bottom_left_one_third },
-    .{ .bottom_right_half, .bottom_right_two_thirds, .bottom_right_one_third },
+const corner_cycles = [4][settings.cycle_width_count]geometry.Placement{
+    .{ .top_left_one_quarter, .top_left_one_third, .top_left_half, .top_left_two_thirds, .top_left_three_quarters },
+    .{ .top_right_one_quarter, .top_right_one_third, .top_right_half, .top_right_two_thirds, .top_right_three_quarters },
+    .{ .bottom_left_one_quarter, .bottom_left_one_third, .bottom_left_half, .bottom_left_two_thirds, .bottom_left_three_quarters },
+    .{ .bottom_right_one_quarter, .bottom_right_one_third, .bottom_right_half, .bottom_right_two_thirds, .bottom_right_three_quarters },
 };
 
-const center_cycles = [3]geometry.Placement{ .center_half, .center_two_thirds, .center_one_third };
+const center_cycles = [settings.cycle_width_count]geometry.Placement{
+    .center_one_quarter,
+    .center_one_third,
+    .center_half,
+    .center_two_thirds,
+    .center_three_quarters,
+};
+
+fn configuredCycle(all: *const [settings.cycle_width_count]geometry.Placement, mask: u8, storage: *[settings.cycle_width_count]geometry.Placement) []const geometry.Placement {
+    var count: usize = 0;
+    for (all, 0..) |placement, index| {
+        if (mask & (@as(u8, 1) << @intCast(index)) == 0) continue;
+        storage[count] = placement;
+        count += 1;
+    }
+    std.debug.assert(count > 0);
+    return storage[0..count];
+}
 
 fn cycleEdge(index: usize) void {
     const hwnd = c.GetForegroundWindow();
     if (hwnd == null) return;
-    const placement = nextWindowCyclePlacement(hwnd, &edge_cycles[index]);
+    var configured: [settings.cycle_width_count]geometry.Placement = undefined;
+    const placement = nextWindowCyclePlacement(hwnd, configuredCycle(&edge_cycles[index], edge_cycle_mask, &configured));
     _ = resizeWindow(hwnd, placement);
 }
 
 fn cycleCorner(index: usize) void {
     const hwnd = c.GetForegroundWindow();
     if (hwnd == null) return;
-    const placement = nextWindowCyclePlacement(hwnd, &corner_cycles[index]);
+    var configured: [settings.cycle_width_count]geometry.Placement = undefined;
+    const placement = nextWindowCyclePlacement(hwnd, configuredCycle(&corner_cycles[index], corner_cycle_mask, &configured));
     _ = resizeWindow(hwnd, placement);
 }
 
-fn nextWindowCyclePlacement(hwnd: c.HWND, cycle: *const [3]geometry.Placement) geometry.Placement {
+fn nextWindowCyclePlacement(hwnd: c.HWND, cycle: []const geometry.Placement) geometry.Placement {
     const monitor = c.MonitorFromWindow(hwnd, c.MONITOR_DEFAULTTONEAREST);
     if (monitor == null) return cycle[0];
 
@@ -520,7 +545,8 @@ fn nextWindowCyclePlacement(hwnd: c.HWND, cycle: *const [3]geometry.Placement) g
 fn cycleCenter() void {
     const hwnd = c.GetForegroundWindow();
     if (hwnd == null) return;
-    const placement = nextWindowCyclePlacement(hwnd, &center_cycles);
+    var configured: [settings.cycle_width_count]geometry.Placement = undefined;
+    const placement = nextWindowCyclePlacement(hwnd, configuredCycle(&center_cycles, center_cycle_mask, &configured));
     _ = resizeWindow(hwnd, placement);
 }
 
@@ -697,6 +723,9 @@ fn showSettingsDialog(owner: c.HWND) void {
         if (windowsSnapEnabled()) c.TRUE else c.FALSE,
         if (autoRunEnabled()) c.TRUE else c.FALSE,
         if (c.ZnapStartupTaskEnabled() != 0) c.TRUE else c.FALSE,
+        edge_cycle_mask,
+        corner_cycle_mask,
+        center_cycle_mask,
     );
 }
 
@@ -719,9 +748,44 @@ pub export fn ZnapUpdateKeymap(index: c.UINT, modifiers: c.UINT, key: c.UINT) c.
     var previous: [256]settings.LoadedKeymap = undefined;
     @memcpy(previous[0..hotkeys.len], hotkeys);
     settings.updateKeymap(hotkeys, index, modifiers, key);
-    settings.save(app_io, app_allocator, settings_file_path, hotkeys) catch |err| {
+    saveSettings() catch |err| {
         @memcpy(hotkeys, previous[0..hotkeys.len]);
         std.log.err("failed to save settings: {s}", .{@errorName(err)});
+        return c.FALSE;
+    };
+    return c.TRUE;
+}
+
+fn saveSettings() !void {
+    try settings.save(
+        app_io,
+        app_allocator,
+        settings_file_path,
+        hotkeys,
+        edge_cycle_mask,
+        corner_cycle_mask,
+        center_cycle_mask,
+    );
+}
+
+pub export fn ZnapUpdateCycleWidth(group: c.UINT, width: c.UINT, enabled: c.BOOL) c.BOOL {
+    if (group >= 3 or width >= settings.cycle_width_count) return c.FALSE;
+    const mask = switch (group) {
+        0 => &edge_cycle_mask,
+        1 => &corner_cycle_mask,
+        2 => &center_cycle_mask,
+        else => unreachable,
+    };
+    const previous = mask.*;
+    const bit = @as(u8, 1) << @intCast(width);
+    mask.* = if (enabled != 0) previous | bit else previous & ~bit;
+    if (mask.* == 0) {
+        mask.* = previous;
+        return c.FALSE;
+    }
+    saveSettings() catch |err| {
+        mask.* = previous;
+        std.log.err("failed to save cycle widths: {s}", .{@errorName(err)});
         return c.FALSE;
     };
     return c.TRUE;

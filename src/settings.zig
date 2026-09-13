@@ -47,8 +47,23 @@ pub const Keymap = struct {
     snapshot_index: ?u4 = null,
 };
 
+pub const CycleWidth = enum {
+    @"1/4",
+    @"1/3",
+    @"1/2",
+    @"2/3",
+    @"3/4",
+};
+
+pub const cycle_width_count = @typeInfo(CycleWidth).@"enum".fields.len;
+pub const default_cycle_widths = [_]CycleWidth{ .@"1/3", .@"1/2", .@"2/3" };
+pub const default_cycle_mask: u8 = cycleWidthBit(.@"1/3") | cycleWidthBit(.@"1/2") | cycleWidthBit(.@"2/3");
+
 pub const Settings = struct {
     keymaps: []const Keymap,
+    edge_cycles: ?[]const CycleWidth = null,
+    corner_cycles: ?[]const CycleWidth = null,
+    center_cycles: ?[]const CycleWidth = null,
 };
 
 pub const LoadedKeymap = struct {
@@ -60,11 +75,17 @@ pub const LoadedKeymap = struct {
 
 pub const LoadedSettings = struct {
     keymaps: []LoadedKeymap,
+    edge_cycles: u8,
+    corner_cycles: u8,
+    center_cycles: u8,
     path: []const u8,
 };
 
 const ParsedSettings = struct {
     keymaps: []LoadedKeymap,
+    edge_cycles: u8,
+    corner_cycles: u8,
+    center_cycles: u8,
     migrated: bool,
 };
 
@@ -125,6 +146,9 @@ pub fn load(
             std.log.warn("could not create settings file ({s}); using defaults", .{@errorName(create_err)});
             return .{
                 .keymaps = try loadDefaultKeymaps(allocator),
+                .edge_cycles = default_cycle_mask,
+                .corner_cycles = default_cycle_mask,
+                .center_cycles = default_cycle_mask,
                 .path = settings_path,
             };
         },
@@ -132,6 +156,9 @@ pub fn load(
             std.log.warn("could not read settings file ({s}); using defaults", .{@errorName(err)});
             return .{
                 .keymaps = try loadDefaultKeymaps(allocator),
+                .edge_cycles = default_cycle_mask,
+                .corner_cycles = default_cycle_mask,
+                .center_cycles = default_cycle_mask,
                 .path = settings_path,
             };
         },
@@ -142,16 +169,22 @@ pub fn load(
         std.log.warn("could not parse settings file ({s}); using defaults", .{@errorName(err)});
         return .{
             .keymaps = try loadDefaultKeymaps(allocator),
+            .edge_cycles = default_cycle_mask,
+            .corner_cycles = default_cycle_mask,
+            .center_cycles = default_cycle_mask,
             .path = settings_path,
         };
     };
     if (parsed.migrated) {
-        save(io, allocator, settings_path, parsed.keymaps) catch |err| {
+        save(io, allocator, settings_path, parsed.keymaps, parsed.edge_cycles, parsed.corner_cycles, parsed.center_cycles) catch |err| {
             std.log.warn("could not save migrated settings file: {s}", .{@errorName(err)});
         };
     }
     return .{
         .keymaps = parsed.keymaps,
+        .edge_cycles = parsed.edge_cycles,
+        .corner_cycles = parsed.corner_cycles,
+        .center_cycles = parsed.center_cycles,
         .path = settings_path,
     };
 }
@@ -249,9 +282,18 @@ fn parseSettings(allocator: std.mem.Allocator, contents: []const u8) !ParsedSett
         };
         loaded_index += 1;
     }
+    const edge_cycles = try cycleMask(parsed.value.edge_cycles orelse &default_cycle_widths);
+    const corner_cycles = try cycleMask(parsed.value.corner_cycles orelse &default_cycle_widths);
+    const center_cycles = try cycleMask(parsed.value.center_cycles orelse &default_cycle_widths);
     return .{
         .keymaps = loaded,
-        .migrated = active_count != parsed.value.keymaps.len,
+        .edge_cycles = edge_cycles,
+        .corner_cycles = corner_cycles,
+        .center_cycles = center_cycles,
+        .migrated = active_count != parsed.value.keymaps.len or
+            parsed.value.edge_cycles == null or
+            parsed.value.corner_cycles == null or
+            parsed.value.center_cycles == null,
     };
 }
 
@@ -261,7 +303,12 @@ pub fn parse(allocator: std.mem.Allocator, contents: []const u8) ![]LoadedKeymap
 
 fn loadDefaultKeymaps(allocator: std.mem.Allocator) ![]LoadedKeymap {
     const contents = try std.fmt.allocPrint(allocator, "{f}", .{std.json.fmt(
-        Settings{ .keymaps = &default_keymaps },
+        Settings{
+            .keymaps = &default_keymaps,
+            .edge_cycles = &default_cycle_widths,
+            .corner_cycles = &default_cycle_widths,
+            .center_cycles = &default_cycle_widths,
+        },
         .{},
     )});
     defer allocator.free(contents);
@@ -273,7 +320,11 @@ pub fn save(
     allocator: std.mem.Allocator,
     path: []const u8,
     keymaps: []const LoadedKeymap,
+    edge_cycles: u8,
+    corner_cycles: u8,
+    center_cycles: u8,
 ) !void {
+    if (edge_cycles == 0 or corner_cycles == 0 or center_cycles == 0) return error.EmptyCycleWidths;
     const serialized = try allocator.alloc(Keymap, keymaps.len);
     defer allocator.free(serialized);
     const modifier_storage = try allocator.alloc([4]Modifier, keymaps.len);
@@ -305,8 +356,16 @@ pub fn save(
         };
     }
 
+    var edge_cycle_storage: [cycle_width_count]CycleWidth = undefined;
+    var corner_cycle_storage: [cycle_width_count]CycleWidth = undefined;
+    var center_cycle_storage: [cycle_width_count]CycleWidth = undefined;
     const contents = try std.fmt.allocPrint(allocator, "{f}\n", .{std.json.fmt(
-        Settings{ .keymaps = serialized },
+        Settings{
+            .keymaps = serialized,
+            .edge_cycles = cycleWidthsFromMask(edge_cycles, &edge_cycle_storage),
+            .corner_cycles = cycleWidthsFromMask(corner_cycles, &corner_cycle_storage),
+            .center_cycles = cycleWidthsFromMask(center_cycles, &center_cycle_storage),
+        },
         .{ .whitespace = .indent_2 },
     )});
     defer allocator.free(contents);
@@ -314,6 +373,33 @@ pub fn save(
     defer atomic.deinit(io);
     try atomic.file.writeStreamingAll(io, contents);
     try atomic.replace(io);
+}
+
+pub fn cycleWidthBit(width: CycleWidth) u8 {
+    return @as(u8, 1) << @intFromEnum(width);
+}
+
+fn cycleMask(widths: []const CycleWidth) !u8 {
+    if (widths.len == 0) return error.EmptyCycleWidths;
+    var mask: u8 = 0;
+    for (widths) |width| {
+        const bit = cycleWidthBit(width);
+        if (mask & bit != 0) return error.DuplicateCycleWidth;
+        mask |= bit;
+    }
+    return mask;
+}
+
+fn cycleWidthsFromMask(mask: u8, storage: *[cycle_width_count]CycleWidth) []const CycleWidth {
+    var count: usize = 0;
+    inline for (@typeInfo(CycleWidth).@"enum".fields) |field| {
+        const width: CycleWidth = @enumFromInt(field.value);
+        if (mask & cycleWidthBit(width) != 0) {
+            storage[count] = width;
+            count += 1;
+        }
+    }
+    return storage[0..count];
 }
 
 pub fn updateKeymap(keymaps: []LoadedKeymap, index: usize, modifiers: u32, key: u32) void {
@@ -412,9 +498,42 @@ test "deprecated keymaps are removed during migration" {
     try std.testing.expectEqual(Action.recall_snapshot, parsed.keymaps[1].action);
 }
 
+test "missing cycle widths migrate to defaults" {
+    const parsed = try parseSettings(std.testing.allocator,
+        \\{"keymaps":[]}
+    );
+    defer std.testing.allocator.free(parsed.keymaps);
+    try std.testing.expect(parsed.migrated);
+    try std.testing.expectEqual(default_cycle_mask, parsed.edge_cycles);
+    try std.testing.expectEqual(default_cycle_mask, parsed.corner_cycles);
+    try std.testing.expectEqual(default_cycle_mask, parsed.center_cycles);
+}
+
+test "parses configured cycle widths" {
+    const parsed = try parseSettings(std.testing.allocator,
+        \\{"keymaps":[],"edge_cycles":["1/4","3/4"],"corner_cycles":["1/2"],"center_cycles":["1/3","2/3"]}
+    );
+    defer std.testing.allocator.free(parsed.keymaps);
+    try std.testing.expect(!parsed.migrated);
+    try std.testing.expectEqual(cycleWidthBit(.@"1/4") | cycleWidthBit(.@"3/4"), parsed.edge_cycles);
+    try std.testing.expectEqual(cycleWidthBit(.@"1/2"), parsed.corner_cycles);
+    try std.testing.expectEqual(cycleWidthBit(.@"1/3") | cycleWidthBit(.@"2/3"), parsed.center_cycles);
+}
+
+test "rejects an empty cycle width group" {
+    try std.testing.expectError(error.EmptyCycleWidths, parseSettings(std.testing.allocator,
+        \\{"keymaps":[],"edge_cycles":[],"corner_cycles":["1/2"],"center_cycles":["1/2"]}
+    ));
+}
+
 test "default keymaps round trip through JSON" {
     const contents = try std.fmt.allocPrint(std.testing.allocator, "{f}", .{std.json.fmt(
-        Settings{ .keymaps = &default_keymaps },
+        Settings{
+            .keymaps = &default_keymaps,
+            .edge_cycles = &default_cycle_widths,
+            .corner_cycles = &default_cycle_widths,
+            .center_cycles = &default_cycle_widths,
+        },
         .{ .whitespace = .indent_2 },
     )});
     defer std.testing.allocator.free(contents);

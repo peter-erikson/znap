@@ -33,33 +33,51 @@ fn coordinateWithinTolerance(a: i32, b: i32, tolerance: i32) bool {
 }
 
 pub const Placement = enum {
+    left_one_quarter,
     left_half,
     left_two_thirds,
     left_one_third,
+    left_three_quarters,
+    right_one_quarter,
     right_half,
     right_two_thirds,
     right_one_third,
+    right_three_quarters,
+    top_one_quarter,
     top_half,
     top_two_thirds,
     top_one_third,
+    top_three_quarters,
+    bottom_one_quarter,
     bottom_half,
     bottom_two_thirds,
     bottom_one_third,
+    bottom_three_quarters,
+    top_left_one_quarter,
     top_left_half,
     top_left_two_thirds,
     top_left_one_third,
+    top_left_three_quarters,
+    top_right_one_quarter,
     top_right_half,
     top_right_two_thirds,
     top_right_one_third,
+    top_right_three_quarters,
+    bottom_left_one_quarter,
     bottom_left_half,
     bottom_left_two_thirds,
     bottom_left_one_third,
+    bottom_left_three_quarters,
+    bottom_right_one_quarter,
     bottom_right_half,
     bottom_right_two_thirds,
     bottom_right_one_third,
+    bottom_right_three_quarters,
+    center_one_quarter,
     center_half,
     center_two_thirds,
     center_one_third,
+    center_three_quarters,
 };
 
 fn left(d: Rect, numerator: i32, denominator: i32) Rect {
@@ -92,33 +110,51 @@ fn centerFullHeight(d: Rect, numerator: i32, denominator: i32) Rect {
 
 pub fn place(placement: Placement, display: Rect, _: Rect) Rect {
     return switch (placement) {
+        .left_one_quarter => left(display, 1, 4),
         .left_half => left(display, 1, 2),
         .left_two_thirds => left(display, 2, 3),
         .left_one_third => left(display, 1, 3),
+        .left_three_quarters => left(display, 3, 4),
+        .right_one_quarter => right(display, 1, 4),
         .right_half => right(display, 1, 2),
         .right_two_thirds => right(display, 2, 3),
         .right_one_third => right(display, 1, 3),
+        .right_three_quarters => right(display, 3, 4),
+        .top_one_quarter => top(display, 1, 4),
         .top_half => top(display, 1, 2),
         .top_two_thirds => top(display, 2, 3),
         .top_one_third => top(display, 1, 3),
+        .top_three_quarters => top(display, 3, 4),
+        .bottom_one_quarter => bottom(display, 1, 4),
         .bottom_half => bottom(display, 1, 2),
         .bottom_two_thirds => bottom(display, 2, 3),
         .bottom_one_third => bottom(display, 1, 3),
+        .bottom_three_quarters => bottom(display, 3, 4),
+        .top_left_one_quarter => merge(left(display, 1, 4), top(display, 1, 2)),
         .top_left_half => merge(left(display, 1, 2), top(display, 1, 2)),
         .top_left_two_thirds => merge(left(display, 2, 3), top(display, 1, 2)),
         .top_left_one_third => merge(left(display, 1, 3), top(display, 1, 2)),
+        .top_left_three_quarters => merge(left(display, 3, 4), top(display, 1, 2)),
+        .top_right_one_quarter => merge(right(display, 1, 4), top(display, 1, 2)),
         .top_right_half => merge(right(display, 1, 2), top(display, 1, 2)),
         .top_right_two_thirds => merge(right(display, 2, 3), top(display, 1, 2)),
         .top_right_one_third => merge(right(display, 1, 3), top(display, 1, 2)),
+        .top_right_three_quarters => merge(right(display, 3, 4), top(display, 1, 2)),
+        .bottom_left_one_quarter => merge(left(display, 1, 4), bottom(display, 1, 2)),
         .bottom_left_half => merge(left(display, 1, 2), bottom(display, 1, 2)),
         .bottom_left_two_thirds => merge(left(display, 2, 3), bottom(display, 1, 2)),
         .bottom_left_one_third => merge(left(display, 1, 3), bottom(display, 1, 2)),
+        .bottom_left_three_quarters => merge(left(display, 3, 4), bottom(display, 1, 2)),
+        .bottom_right_one_quarter => merge(right(display, 1, 4), bottom(display, 1, 2)),
         .bottom_right_half => merge(right(display, 1, 2), bottom(display, 1, 2)),
         .bottom_right_two_thirds => merge(right(display, 2, 3), bottom(display, 1, 2)),
         .bottom_right_one_third => merge(right(display, 1, 3), bottom(display, 1, 2)),
+        .bottom_right_three_quarters => merge(right(display, 3, 4), bottom(display, 1, 2)),
+        .center_one_quarter => centerFullHeight(display, 1, 4),
         .center_half => centerFullHeight(display, 1, 2),
         .center_two_thirds => centerFullHeight(display, 2, 3),
         .center_one_third => centerFullHeight(display, 1, 3),
+        .center_three_quarters => centerFullHeight(display, 3, 4),
     };
 }
 
@@ -143,6 +179,8 @@ test "center placements fill height and cycle the edge widths" {
     try std.testing.expectEqual(Rect{ .left = 580, .top = -900, .right = 1540, .bottom = 180 }, place(.center_half, display, undefined));
     try std.testing.expectEqual(Rect{ .left = 420, .top = -900, .right = 1700, .bottom = 180 }, place(.center_two_thirds, display, undefined));
     try std.testing.expectEqual(Rect{ .left = 740, .top = -900, .right = 1380, .bottom = 180 }, place(.center_one_third, display, undefined));
+    try std.testing.expectEqual(Rect{ .left = 820, .top = -900, .right = 1300, .bottom = 180 }, place(.center_one_quarter, display, undefined));
+    try std.testing.expectEqual(Rect{ .left = 340, .top = -900, .right = 1780, .bottom = 180 }, place(.center_three_quarters, display, undefined));
 }
 
 test "overlap tolerance ignores thin edge and corner intersections" {
