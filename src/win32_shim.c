@@ -371,6 +371,7 @@ void ZnapShowSnapWarning(HINSTANCE instance) {
 #define ZNAP_SETTINGS_WIDTH 980
 #define ZNAP_SETTINGS_HEIGHT 700
 #define ZNAP_SETTINGS_FONT_POINTS 11
+#define ZNAP_INFO_TEXT_FONT_POINTS 10
 #define ZNAP_SECTION_FONT_POINTS 13
 #define ZNAP_SECTION_CONTENT_PADDING 6
 #define ZNAP_NAVIGATION_WIDTH 210
@@ -399,12 +400,14 @@ static HWND znap_general_page = NULL;
 static HWND znap_keybinds_page = NULL;
 static HWND znap_startup_normal = NULL;
 static HWND znap_startup_admin = NULL;
+static HWND znap_startup_info = NULL;
 static int znap_general_content_height = 0;
 static int znap_keybinds_content_height = 0;
 static ZnapSettingsRowState znap_settings_rows[ZNAP_MAX_KEYMAPS];
 static UINT znap_settings_row_count = 0;
 static LONG znap_recording_row = -1;
 static HFONT znap_settings_font = NULL;
+static HFONT znap_info_text_font = NULL;
 static HFONT znap_section_font = NULL;
 static HFONT znap_navigation_font = NULL;
 static HWND znap_section_headers[ZNAP_MAX_SECTION_HEADERS];
@@ -514,6 +517,9 @@ static void ZnapRefreshSettingsFonts(HWND window) {
     LOGFONTW message_font_info = metrics.lfMessageFont;
     message_font_info.lfHeight = -MulDiv(ZNAP_SETTINGS_FONT_POINTS, (int)znap_settings_dpi, 72);
     HFONT message_font = CreateFontIndirectW(&message_font_info);
+    LOGFONTW info_text_font_info = metrics.lfMessageFont;
+    info_text_font_info.lfHeight = -MulDiv(ZNAP_INFO_TEXT_FONT_POINTS, (int)znap_settings_dpi, 72);
+    HFONT info_text_font = CreateFontIndirectW(&info_text_font_info);
     LOGFONTW section_font_info = metrics.lfMessageFont;
     section_font_info.lfHeight = -MulDiv(ZNAP_SECTION_FONT_POINTS, (int)znap_settings_dpi, 72);
     section_font_info.lfWeight = FW_BOLD;
@@ -528,6 +534,13 @@ static void ZnapRefreshSettingsFonts(HWND window) {
         }
         if (znap_settings_font != NULL) DeleteObject(znap_settings_font);
         znap_settings_font = message_font;
+    }
+    if (info_text_font != NULL) {
+        if (znap_startup_info != NULL) {
+            SendMessageW(znap_startup_info, WM_SETFONT, (WPARAM)info_text_font, TRUE);
+        }
+        if (znap_info_text_font != NULL) DeleteObject(znap_info_text_font);
+        znap_info_text_font = info_text_font;
     }
     if (section_font != NULL) {
         for (UINT index = 0; index < znap_section_header_count; index++) {
@@ -994,6 +1007,29 @@ static void ZnapLayoutSettingsWindow(HWND window) {
         SWP_NOZORDER | SWP_NOACTIVATE);
 }
 
+static void ZnapSetStartupCheckboxes(BOOL normal_enabled, BOOL admin_enabled) {
+    SendMessageW(znap_startup_normal, BM_SETCHECK, normal_enabled ? BST_CHECKED : BST_UNCHECKED, 0);
+    SendMessageW(znap_startup_admin, BM_SETCHECK, admin_enabled ? BST_CHECKED : BST_UNCHECKED, 0);
+}
+
+static BOOL ZnapApplyStartupCheckboxChange(UINT id, BOOL enabled, BOOL previous_normal, BOOL previous_admin) {
+    if (!enabled) {
+        return ZnapSetStartupOption(id == ZNAP_STARTUP_NORMAL ? 0 : 1, FALSE);
+    }
+
+    if (id == ZNAP_STARTUP_NORMAL) {
+        if (previous_admin && !ZnapSetStartupOption(1, FALSE)) return FALSE;
+        if (ZnapSetStartupOption(0, TRUE)) return TRUE;
+        if (previous_admin) ZnapSetStartupOption(1, TRUE);
+        return FALSE;
+    }
+
+    if (!ZnapSetStartupOption(1, TRUE)) return FALSE;
+    if (!previous_normal || ZnapSetStartupOption(0, FALSE)) return TRUE;
+    ZnapSetStartupOption(1, FALSE);
+    return FALSE;
+}
+
 static LRESULT CALLBACK ZnapSettingsProc(HWND window, UINT message, WPARAM wparam, LPARAM lparam) {
     switch (message) {
         case WM_ERASEBKGND: {
@@ -1057,15 +1093,17 @@ static LRESULT CALLBACK ZnapSettingsProc(HWND window, UINT message, WPARAM wpara
             if ((id == ZNAP_STARTUP_NORMAL || id == ZNAP_STARTUP_ADMIN) && notification == BN_CLICKED) {
                 HWND checkbox = id == ZNAP_STARTUP_NORMAL ? znap_startup_normal : znap_startup_admin;
                 const BOOL enabled = SendMessageW(checkbox, BM_GETCHECK, 0, 0) == BST_CHECKED;
-                const UINT option = id == ZNAP_STARTUP_NORMAL ? 0 : 1;
-                if (!ZnapSetStartupOption(option, enabled)) {
-                    SendMessageW(checkbox, BM_SETCHECK, enabled ? BST_UNCHECKED : BST_CHECKED, 0);
-                    MessageBoxW(window, id == ZNAP_STARTUP_ADMIN
-                        ? L"The administrator startup task could not be updated."
-                        : L"The startup setting could not be updated.", L"Znap Settings", MB_OK | MB_ICONERROR);
-                } else if (id == ZNAP_STARTUP_ADMIN) {
-                    if (enabled) SendMessageW(znap_startup_normal, BM_SETCHECK, BST_UNCHECKED, 0);
-                    EnableWindow(znap_startup_normal, !enabled);
+                const BOOL current_normal = SendMessageW(znap_startup_normal, BM_GETCHECK, 0, 0) == BST_CHECKED;
+                const BOOL current_admin = SendMessageW(znap_startup_admin, BM_GETCHECK, 0, 0) == BST_CHECKED;
+                const BOOL previous_normal = id == ZNAP_STARTUP_NORMAL ? !enabled : current_normal;
+                const BOOL previous_admin = id == ZNAP_STARTUP_ADMIN ? !enabled : current_admin;
+                if (!ZnapApplyStartupCheckboxChange(id, enabled, previous_normal, previous_admin)) {
+                    ZnapSetStartupCheckboxes(previous_normal, previous_admin);
+                    MessageBoxW(window,
+                        L"The startup settings could not be updated. The previous selection has been restored.",
+                        L"Znap Settings", MB_OK | MB_ICONERROR);
+                } else if (enabled) {
+                    ZnapSetStartupCheckboxes(id == ZNAP_STARTUP_NORMAL, id == ZNAP_STARTUP_ADMIN);
                 }
                 return 0;
             }
@@ -1194,6 +1232,10 @@ static LRESULT CALLBACK ZnapSettingsProc(HWND window, UINT message, WPARAM wpara
                 DeleteObject(znap_section_font);
                 znap_section_font = NULL;
             }
+            if (znap_info_text_font != NULL) {
+                DeleteObject(znap_info_text_font);
+                znap_info_text_font = NULL;
+            }
             if (znap_settings_font != NULL) {
                 DeleteObject(znap_settings_font);
                 znap_settings_font = NULL;
@@ -1205,6 +1247,7 @@ static LRESULT CALLBACK ZnapSettingsProc(HWND window, UINT message, WPARAM wpara
             znap_keybinds_page = NULL;
             znap_startup_normal = NULL;
             znap_startup_admin = NULL;
+            znap_startup_info = NULL;
             znap_section_header_count = 0;
             znap_settings_tooltip = NULL;
             znap_settings_row_count = 0;
@@ -1288,24 +1331,29 @@ void ZnapShowSettingsDialog(HINSTANCE instance, HWND owner, const ZnapKeymapRow 
     ZnapApplyThemeToChild(znap_general_page, 0);
     ZnapApplyThemeToChild(znap_keybinds_page, 0);
 
-    ZnapCreateSettingsHeader(L"Startup", 20, znap_general_page);
+    int startup_y = 20;
+    if (show_snap_warning) {
+        ZnapCreateSettingsHeader(L"Windows snapping", 20, znap_general_page);
+        ZnapCreateSettingsControl(0, L"STATIC", L"Znap can have compatibility issues with Windows default window snapping functionality. It is recommended to disable window snapping from Windows settings for the best user experience.", SS_LEFT, 20, 56, 650, 48, znap_general_page, 0);
+        ZnapCreateSettingsControl(0, L"BUTTON", L"Open Windows Settings", BS_PUSHBUTTON | WS_TABSTOP, 20, 118, 190, 32, znap_general_page, ZNAP_OPEN_WINDOWS_SETTINGS);
+        ZnapCreateSettingsControl(0, L"STATIC", L"", SS_ETCHEDHORZ, 20, 166, 650, 2, znap_general_page, 0);
+        startup_y = 186;
+    }
+
+    ZnapCreateSettingsHeader(L"Startup", startup_y, znap_general_page);
     znap_startup_normal = ZnapCreateLargeCheckbox(L"Run on startup",
-        50 + ZNAP_SECTION_CONTENT_PADDING, znap_general_page, ZNAP_STARTUP_NORMAL);
+        startup_y + 36, znap_general_page, ZNAP_STARTUP_NORMAL);
     znap_startup_admin = ZnapCreateLargeCheckbox(L"Run on startup as administrator",
-        84 + ZNAP_SECTION_CONTENT_PADDING, znap_general_page, ZNAP_STARTUP_ADMIN);
+        startup_y + 70, znap_general_page, ZNAP_STARTUP_ADMIN);
     SendMessageW(znap_startup_normal, BM_SETCHECK, startup_enabled && !admin_startup_enabled ? BST_CHECKED : BST_UNCHECKED, 0);
     SendMessageW(znap_startup_admin, BM_SETCHECK, admin_startup_enabled ? BST_CHECKED : BST_UNCHECKED, 0);
-    EnableWindow(znap_startup_normal, !admin_startup_enabled);
-
-    int general_bottom = 138 + ZNAP_SECTION_CONTENT_PADDING;
-    if (show_snap_warning) {
-        ZnapCreateSettingsControl(0, L"STATIC", L"", SS_ETCHEDHORZ, 20, 136 + ZNAP_SECTION_CONTENT_PADDING, 650, 2, znap_general_page, 0);
-        ZnapCreateSettingsHeader(L"Windows snapping", 156 + ZNAP_SECTION_CONTENT_PADDING, znap_general_page);
-        ZnapCreateSettingsControl(0, L"STATIC", L"Znap can have compatibility issues with Windows default window snapping functionality. It is recommended to disable window snapping from Windows settings for the best user experience.", SS_LEFT, 20, 186 + ZNAP_SECTION_CONTENT_PADDING * 2, 650, 48, znap_general_page, 0);
-        ZnapCreateSettingsControl(0, L"BUTTON", L"Open Windows Settings", BS_PUSHBUTTON | WS_TABSTOP, 20, 248 + ZNAP_SECTION_CONTENT_PADDING * 2, 190, 32, znap_general_page, ZNAP_OPEN_WINDOWS_SETTINGS);
-        general_bottom = 308 + ZNAP_SECTION_CONTENT_PADDING * 2;
+    znap_startup_info = ZnapCreateSettingsControl(0, L"STATIC",
+        L"The Znap process will start up quicker on Windows startup, running as administrator. It also enables snapping application windows running under administrator priviliges.",
+        SS_LEFT, 58, startup_y + 106, 600, 54, znap_general_page, 0);
+    if (znap_startup_info != NULL && znap_info_text_font != NULL) {
+        SendMessageW(znap_startup_info, WM_SETFONT, (WPARAM)znap_info_text_font, TRUE);
     }
-    znap_general_content_height = general_bottom;
+    znap_general_content_height = startup_y + 176;
 
     int y = 20;
     ZnapCreateSettingsHeader(L"Navigation", y, znap_keybinds_page);
