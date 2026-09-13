@@ -46,6 +46,9 @@ var hotkeys: []settings.LoadedKeymap = &.{};
 var edge_cycle_mask: u8 = settings.default_cycle_mask;
 var corner_cycle_mask: u8 = settings.default_cycle_mask;
 var center_cycle_mask: u8 = settings.default_cycle_mask;
+var default_edge_cycle_width: settings.CycleWidth = settings.default_cycle_width;
+var default_corner_cycle_width: settings.CycleWidth = settings.default_cycle_width;
+var default_center_cycle_width: settings.CycleWidth = settings.default_cycle_width;
 var app_io: std.Io = undefined;
 var app_allocator: std.mem.Allocator = undefined;
 var settings_file_path: []const u8 = &.{};
@@ -113,6 +116,9 @@ pub fn main(init: std.process.Init) !void {
     edge_cycle_mask = loaded_settings.edge_cycles;
     corner_cycle_mask = loaded_settings.corner_cycles;
     center_cycle_mask = loaded_settings.center_cycles;
+    default_edge_cycle_width = loaded_settings.default_edge_cycle_width;
+    default_corner_cycle_width = loaded_settings.default_corner_cycle_width;
+    default_center_cycle_width = loaded_settings.default_center_cycle_width;
     settings_file_path = loaded_settings.path;
 
     const instance = c.GetModuleHandleW(null);
@@ -502,22 +508,29 @@ const center_cycles = [settings.cycle_width_count]geometry.Placement{
     .center_three_quarters,
 };
 
-fn configuredCycle(all: *const [settings.cycle_width_count]geometry.Placement, mask: u8, storage: *[settings.cycle_width_count]geometry.Placement) []const geometry.Placement {
+fn configuredCycle(all: *const [settings.cycle_width_count]geometry.Placement, mask: u8, default_width: settings.CycleWidth, storage: *[settings.cycle_width_count]geometry.Placement) []const geometry.Placement {
     var count: usize = 0;
-    for (all, 0..) |placement, index| {
+    for (0..settings.cycle_width_count) |offset| {
+        const index = (@intFromEnum(default_width) + offset) % settings.cycle_width_count;
         if (mask & (@as(u8, 1) << @intCast(index)) == 0) continue;
-        storage[count] = placement;
+        storage[count] = all[index];
         count += 1;
     }
     std.debug.assert(count > 0);
     return storage[0..count];
 }
 
+test "configured cycle starts at the selected default width" {
+    var configured: [settings.cycle_width_count]geometry.Placement = undefined;
+    const cycle = configuredCycle(&edge_cycles[0], settings.default_cycle_mask, .@"1/2", &configured);
+    try std.testing.expectEqualSlices(geometry.Placement, &.{ .left_half, .left_two_thirds, .left_one_third }, cycle);
+}
+
 fn cycleEdge(index: usize) void {
     const hwnd = c.GetForegroundWindow();
     if (hwnd == null) return;
     var configured: [settings.cycle_width_count]geometry.Placement = undefined;
-    const placement = nextWindowCyclePlacement(hwnd, configuredCycle(&edge_cycles[index], edge_cycle_mask, &configured));
+    const placement = nextWindowCyclePlacement(hwnd, configuredCycle(&edge_cycles[index], edge_cycle_mask, default_edge_cycle_width, &configured));
     _ = resizeWindow(hwnd, placement);
 }
 
@@ -525,7 +538,7 @@ fn cycleCorner(index: usize) void {
     const hwnd = c.GetForegroundWindow();
     if (hwnd == null) return;
     var configured: [settings.cycle_width_count]geometry.Placement = undefined;
-    const placement = nextWindowCyclePlacement(hwnd, configuredCycle(&corner_cycles[index], corner_cycle_mask, &configured));
+    const placement = nextWindowCyclePlacement(hwnd, configuredCycle(&corner_cycles[index], corner_cycle_mask, default_corner_cycle_width, &configured));
     _ = resizeWindow(hwnd, placement);
 }
 
@@ -546,7 +559,7 @@ fn cycleCenter() void {
     const hwnd = c.GetForegroundWindow();
     if (hwnd == null) return;
     var configured: [settings.cycle_width_count]geometry.Placement = undefined;
-    const placement = nextWindowCyclePlacement(hwnd, configuredCycle(&center_cycles, center_cycle_mask, &configured));
+    const placement = nextWindowCyclePlacement(hwnd, configuredCycle(&center_cycles, center_cycle_mask, default_center_cycle_width, &configured));
     _ = resizeWindow(hwnd, placement);
 }
 
@@ -726,6 +739,9 @@ fn showSettingsDialog(owner: c.HWND) void {
         edge_cycle_mask,
         corner_cycle_mask,
         center_cycle_mask,
+        @intFromEnum(default_edge_cycle_width),
+        @intFromEnum(default_corner_cycle_width),
+        @intFromEnum(default_center_cycle_width),
     );
 }
 
@@ -765,7 +781,17 @@ fn saveSettings() !void {
         edge_cycle_mask,
         corner_cycle_mask,
         center_cycle_mask,
+        default_edge_cycle_width,
+        default_corner_cycle_width,
+        default_center_cycle_width,
     );
+}
+
+fn firstEnabledCycleWidth(mask: u8) settings.CycleWidth {
+    for (0..settings.cycle_width_count) |index| {
+        if (mask & (@as(u8, 1) << @intCast(index)) != 0) return @enumFromInt(index);
+    }
+    unreachable;
 }
 
 pub export fn ZnapUpdateCycleWidth(group: c.UINT, width: c.UINT, enabled: c.BOOL) c.BOOL {
@@ -776,16 +802,51 @@ pub export fn ZnapUpdateCycleWidth(group: c.UINT, width: c.UINT, enabled: c.BOOL
         2 => &center_cycle_mask,
         else => unreachable,
     };
+    const default_width = switch (group) {
+        0 => &default_edge_cycle_width,
+        1 => &default_corner_cycle_width,
+        2 => &default_center_cycle_width,
+        else => unreachable,
+    };
     const previous = mask.*;
+    const previous_default = default_width.*;
     const bit = @as(u8, 1) << @intCast(width);
     mask.* = if (enabled != 0) previous | bit else previous & ~bit;
     if (mask.* == 0) {
         mask.* = previous;
         return c.FALSE;
     }
+    if (mask.* & settings.cycleWidthBit(default_width.*) == 0) default_width.* = firstEnabledCycleWidth(mask.*);
     saveSettings() catch |err| {
         mask.* = previous;
+        default_width.* = previous_default;
         std.log.err("failed to save cycle widths: {s}", .{@errorName(err)});
+        return c.FALSE;
+    };
+    return c.TRUE;
+}
+
+pub export fn ZnapUpdateDefaultCycleWidth(group: c.UINT, width: c.UINT) c.BOOL {
+    if (group >= 3 or width >= settings.cycle_width_count) return c.FALSE;
+    const mask = switch (group) {
+        0 => edge_cycle_mask,
+        1 => corner_cycle_mask,
+        2 => center_cycle_mask,
+        else => unreachable,
+    };
+    const default_width = switch (group) {
+        0 => &default_edge_cycle_width,
+        1 => &default_corner_cycle_width,
+        2 => &default_center_cycle_width,
+        else => unreachable,
+    };
+    const selected: settings.CycleWidth = @enumFromInt(width);
+    if (mask & settings.cycleWidthBit(selected) == 0) return c.FALSE;
+    const previous = default_width.*;
+    default_width.* = selected;
+    saveSettings() catch |err| {
+        default_width.* = previous;
+        std.log.err("failed to save default cycle width: {s}", .{@errorName(err)});
         return c.FALSE;
     };
     return c.TRUE;
