@@ -27,9 +27,10 @@ typedef struct ZnapKeymapRow {
     UINT key;
 } ZnapKeymapRow;
 
-void ZnapShowSettingsDialog(HINSTANCE instance, HWND owner, const ZnapKeymapRow *rows, UINT row_count, UINT general_count, BOOL show_snap_warning);
+void ZnapShowSettingsDialog(HINSTANCE instance, HWND owner, const ZnapKeymapRow *rows, UINT row_count, UINT general_count, BOOL show_snap_warning, BOOL startup_enabled, BOOL admin_startup_enabled);
 BOOL ZnapSettingsRecording(void);
 void ZnapRecordKeymap(UINT modifiers, UINT key);
 
 /* Implemented in Zig and called by the native settings window. */
 BOOL ZnapUpdateKeymap(UINT index, UINT modifiers, UINT key);
+BOOL ZnapSetStartupOption(UINT option, BOOL enabled);

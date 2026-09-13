@@ -25,9 +25,7 @@ const hotkey_message = c.WM_APP + 2;
 const tray_id = 1;
 const menu_documentation = 1001;
 const menu_settings = 1002;
-const menu_startup = 1003;
 const menu_quit = 1004;
-const menu_startup_admin = 1005;
 
 const mod_alt: u32 = 0x0001;
 const mod_control: u32 = 0x0002;
@@ -612,6 +610,7 @@ fn isZonableWindow(hwnd: c.HWND) bool {
 }
 
 const system_class_names = [_][]const u16{
+    std.unicode.utf8ToUtf16LeStringLiteral("Znap.SettingsWindow"),
     std.unicode.utf8ToUtf16LeStringLiteral("SysListView32"),
     std.unicode.utf8ToUtf16LeStringLiteral("WorkerW"),
     std.unicode.utf8ToUtf16LeStringLiteral("Shell_TrayWnd"),
@@ -664,13 +663,6 @@ fn showTrayMenu(hwnd: c.HWND) void {
     _ = c.AppendMenuW(menu, c.MF_STRING, menu_documentation, std.unicode.utf8ToUtf16LeStringLiteral("Documentation"));
     _ = c.AppendMenuW(menu, c.MF_STRING, menu_settings, std.unicode.utf8ToUtf16LeStringLiteral("Settings"));
     _ = c.AppendMenuW(menu, c.MF_SEPARATOR, 0, null);
-    const admin_startup_enabled = c.ZnapStartupTaskEnabled() != 0;
-    var startup_flags: c.UINT = if (autoRunEnabled()) c.MF_CHECKED else 0;
-    if (admin_startup_enabled) startup_flags |= c.MF_GRAYED;
-    _ = c.AppendMenuW(menu, startup_flags, menu_startup, std.unicode.utf8ToUtf16LeStringLiteral("Run on startup"));
-    const admin_startup_flags: c.UINT = if (admin_startup_enabled) c.MF_CHECKED else 0;
-    _ = c.AppendMenuW(menu, admin_startup_flags, menu_startup_admin, std.unicode.utf8ToUtf16LeStringLiteral("Run on startup (as administrator)"));
-    _ = c.AppendMenuW(menu, c.MF_SEPARATOR, 0, null);
     _ = c.AppendMenuW(menu, c.MF_STRING, menu_quit, std.unicode.utf8ToUtf16LeStringLiteral("Quit"));
 
     var point: c.POINT = undefined;
@@ -680,8 +672,6 @@ fn showTrayMenu(hwnd: c.HWND) void {
     switch (command) {
         menu_documentation => _ = c.ShellExecuteW(hwnd, std.unicode.utf8ToUtf16LeStringLiteral("open"), documentation_url, null, null, c.SW_SHOWNORMAL),
         menu_settings => showSettingsDialog(hwnd),
-        menu_startup => if (!admin_startup_enabled) toggleAutoRun(),
-        menu_startup_admin => toggleAdminAutoRun(hwnd),
         menu_quit => _ = c.DestroyWindow(hwnd),
         else => {},
     }
@@ -711,6 +701,8 @@ fn showSettingsDialog(owner: c.HWND) void {
         @intCast(row_count),
         @intCast(general_count),
         if (windowsSnapEnabled()) c.TRUE else c.FALSE,
+        if (autoRunEnabled()) c.TRUE else c.FALSE,
+        if (c.ZnapStartupTaskEnabled() != 0) c.TRUE else c.FALSE,
     );
 }
 
@@ -752,42 +744,33 @@ fn autoRunEnabled() bool {
         value_type == c.REG_SZ and bytes > @sizeOf(u16);
 }
 
-fn toggleAutoRun() void {
-    if (autoRunEnabled()) disableAutoRun() else enableAutoRun();
-}
-
-fn enableAutoRun() void {
+fn setAutoRun(enabled: bool) bool {
     var key: c.HKEY = null;
-    if (c.RegOpenKeyExW(c.ZnapHkeyCurrentUser(), startup_key, 0, c.KEY_SET_VALUE, &key) != c.ERROR_SUCCESS) return;
+    if (c.RegOpenKeyExW(c.ZnapHkeyCurrentUser(), startup_key, 0, c.KEY_SET_VALUE, &key) != c.ERROR_SUCCESS) return false;
     defer _ = c.RegCloseKey(key);
+
+    if (!enabled) {
+        const result = c.RegDeleteValueW(key, startup_value);
+        return result == c.ERROR_SUCCESS or result == c.ERROR_FILE_NOT_FOUND;
+    }
 
     var executable: [32768]u16 = [_]u16{0} ** 32768;
     const length = c.GetModuleFileNameW(null, &executable, executable.len - 3);
-    if (length == 0) return;
+    if (length == 0) return false;
     var command: [32768]u16 = [_]u16{0} ** 32768;
     command[0] = '"';
     @memcpy(command[1 .. length + 1], executable[0..length]);
     command[length + 1] = '"';
     command[length + 2] = 0;
     const byte_length: c.DWORD = @intCast((length + 3) * @sizeOf(u16));
-    _ = c.RegSetValueExW(key, startup_value, 0, c.REG_SZ, @ptrCast(&command), byte_length);
+    return c.RegSetValueExW(key, startup_value, 0, c.REG_SZ, @ptrCast(&command), byte_length) == c.ERROR_SUCCESS;
 }
 
-fn disableAutoRun() void {
-    var key: c.HKEY = null;
-    if (c.RegOpenKeyExW(c.ZnapHkeyCurrentUser(), startup_key, 0, c.KEY_SET_VALUE, &key) != c.ERROR_SUCCESS) return;
-    defer _ = c.RegCloseKey(key);
-    _ = c.RegDeleteValueW(key, startup_value);
-}
-
-fn toggleAdminAutoRun(owner: c.HWND) void {
-    const enable = c.ZnapStartupTaskEnabled() == 0;
-    if (c.ZnapSetStartupTaskElevated(if (enable) c.TRUE else c.FALSE) == 0) {
-        _ = c.MessageBoxW(
-            owner,
-            std.unicode.utf8ToUtf16LeStringLiteral("The scheduled startup task could not be updated."),
-            app_name,
-            c.MB_OK | c.MB_ICONERROR,
-        );
-    }
+pub export fn ZnapSetStartupOption(option: c.UINT, enabled: c.BOOL) c.BOOL {
+    const succeeded = switch (option) {
+        0 => setAutoRun(enabled != 0),
+        1 => c.ZnapSetStartupTaskElevated(enabled) != 0,
+        else => false,
+    };
+    return if (succeeded) c.TRUE else c.FALSE;
 }

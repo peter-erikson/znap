@@ -24,12 +24,12 @@ A dependency-free hotkey oriented window manager for Windows 10 & 11 inspired by
 | Store the currently fully visible windows and window focus in snapshot 1–9 or 0 (ignoring always-on-top overlays) | `Win` + `Alt` + `1`–`9` or `0` |
 | Recall snapshot 1–9 or 0, raise its windows, promote them in Alt+Tab, and restore focus | `Win` + `1`–`9` or `0` |
 
-The notification-area menu opens the settings dialog, links to the original documentation, toggles launch at sign-in, and exits the application.
+The notification-area menu opens the settings dialog, links to the original documentation, and exits the application.
 Successfully stored windows briefly wiggle down and back up as confirmation.
 
 ## Settings
 
-Select **Settings** from Znap's notification-area menu to view and remap the general window-management and snapshot shortcuts. Click a shortcut field, then press a non-modifier key while holding at least one modifier key (`Win`, `Ctrl`, `Alt`, or `Shift`) to record the new shortcut. Press `Backspace` while recording to clear a shortcut.
+Select **Settings** from Znap's notification-area menu. The **General** page contains the startup and Windows snapping options. The **Keybinds** page lists the window-management and snapshot shortcut groups vertically and scrolls when they exceed the available space. Click a shortcut field, then press a non-modifier key while holding at least one modifier key (`Win`, `Ctrl`, `Alt`, or `Shift`) to record the new shortcut. Press `Backspace` while recording to clear a shortcut.
 
 Changes are saved immediately to `%USERPROFILE%\.config\znap\settings.json` and loaded the next time Znap starts. Assigning a shortcut that is already used by another Znap action clears the duplicate assignment. A yellow warning icon identifies shortcuts that collide with a global Windows shortcut; hover over it for more information.
 
@@ -41,14 +41,12 @@ The settings window follows the Windows light, dark, and high-contrast themes, u
 
 ## Run on startup
 
-The notification-area menu provides two startup modes:
+The **General** settings page provides two startup modes:
 
 - **Run on startup** launches Znap with normal user privileges through the current user's startup registry entry. This mode does not require administrator approval.
 - **Run on startup (as administrator)** launches Znap with the current user's highest available privileges through Task Scheduler. Windows asks for administrator approval when this setting is changed.
 
 The modes are mutually exclusive. Administrator startup takes precedence and temporarily disables the normal startup option until it is turned off. The administrator task waits briefly after sign-in for Explorer's notification area to become available.
-
-![Znap notification-area menu](assets/tray_menu.png)
 
 ## Build
 
