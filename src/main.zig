@@ -308,7 +308,6 @@ fn handleHotkey(id: i32) void {
         .corner_bottom_right => cycleCorner(3),
         .maximize => toggleMaximize(c.GetForegroundWindow()),
         .center => cycleCenter(),
-        .always_on_top => toggleAlwaysOnTop(c.GetForegroundWindow()),
         .store_snapshot => storeSnapshot(hotkey.snapshot_index),
         .recall_snapshot => recallSnapshot(hotkey.snapshot_index),
     }
@@ -576,13 +575,6 @@ fn resizeWindow(hwnd: c.HWND, placement: geometry.Placement) bool {
 
 fn fromWinRect(rect: c.RECT) geometry.Rect {
     return .{ .left = rect.left, .top = rect.top, .right = rect.right, .bottom = rect.bottom };
-}
-
-fn toggleAlwaysOnTop(hwnd: c.HWND) void {
-    if (!isZonableWindow(hwnd)) return;
-    const style: u32 = @bitCast(c.GetWindowLongW(hwnd, c.GWL_EXSTYLE));
-    const insert_after: c.HWND = if ((style & c.WS_EX_TOPMOST) != 0) c.ZnapHwndNotopmost() else c.ZnapHwndTopmost();
-    _ = c.SetWindowPos(hwnd, insert_after, 0, 0, 0, 0, c.SWP_NOMOVE | c.SWP_NOSIZE | c.SWP_NOACTIVATE);
 }
 
 fn isZonableWindow(hwnd: c.HWND) bool {

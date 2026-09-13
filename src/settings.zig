@@ -11,9 +11,26 @@ pub const Action = enum {
     corner_bottom_right,
     maximize,
     center,
-    always_on_top,
     store_snapshot,
     recall_snapshot,
+};
+
+const SerializedAction = enum {
+    edge_left,
+    edge_right,
+    edge_top,
+    edge_bottom,
+    corner_top_left,
+    corner_top_right,
+    corner_bottom_left,
+    corner_bottom_right,
+    maximize,
+    center,
+    store_snapshot,
+    recall_snapshot,
+
+    // Retained only so older settings files can be migrated.
+    always_on_top,
 };
 
 pub const Modifier = enum {
@@ -26,7 +43,7 @@ pub const Modifier = enum {
 pub const Keymap = struct {
     modifiers: []const Modifier,
     key: []const u8,
-    action: Action,
+    action: SerializedAction,
     snapshot_index: ?u4 = null,
 };
 
@@ -44,6 +61,11 @@ pub const LoadedKeymap = struct {
 pub const LoadedSettings = struct {
     keymaps: []LoadedKeymap,
     path: []const u8,
+};
+
+const ParsedSettings = struct {
+    keymaps: []LoadedKeymap,
+    migrated: bool,
 };
 
 const mod_alt: u32 = 0x0001;
@@ -65,7 +87,6 @@ pub const default_keymaps = [_]Keymap{
     .{ .modifiers = win, .key = "page_down", .action = .corner_bottom_right },
     .{ .modifiers = win, .key = "enter", .action = .maximize },
     .{ .modifiers = win, .key = "backslash", .action = .center },
-    .{ .modifiers = win_alt, .key = "a", .action = .always_on_top },
     .{ .modifiers = win_alt, .key = "1", .action = .store_snapshot, .snapshot_index = 0 },
     .{ .modifiers = win, .key = "1", .action = .recall_snapshot, .snapshot_index = 0 },
     .{ .modifiers = win_alt, .key = "2", .action = .store_snapshot, .snapshot_index = 1 },
@@ -100,12 +121,37 @@ pub fn load(
     errdefer allocator.free(settings_path);
 
     const contents = std.Io.Dir.cwd().readFileAlloc(io, settings_path, allocator, .limited(1024 * 1024)) catch |err| switch (err) {
-        error.FileNotFound => try createDefaultFile(io, allocator, settings_dir, settings_path),
-        else => return err,
+        error.FileNotFound => createDefaultFile(io, allocator, settings_dir, settings_path) catch |create_err| {
+            std.log.warn("could not create settings file ({s}); using defaults", .{@errorName(create_err)});
+            return .{
+                .keymaps = try loadDefaultKeymaps(allocator),
+                .path = settings_path,
+            };
+        },
+        else => {
+            std.log.warn("could not read settings file ({s}); using defaults", .{@errorName(err)});
+            return .{
+                .keymaps = try loadDefaultKeymaps(allocator),
+                .path = settings_path,
+            };
+        },
     };
     defer allocator.free(contents);
+
+    const parsed = parseSettings(allocator, contents) catch |err| {
+        std.log.warn("could not parse settings file ({s}); using defaults", .{@errorName(err)});
+        return .{
+            .keymaps = try loadDefaultKeymaps(allocator),
+            .path = settings_path,
+        };
+    };
+    if (parsed.migrated) {
+        save(io, allocator, settings_path, parsed.keymaps) catch |err| {
+            std.log.warn("could not save migrated settings file: {s}", .{@errorName(err)});
+        };
+    }
     return .{
-        .keymaps = try parse(allocator, contents),
+        .keymaps = parsed.keymaps,
         .path = settings_path,
     };
 }
@@ -135,15 +181,56 @@ fn createDefaultFile(
     return contents;
 }
 
-pub fn parse(allocator: std.mem.Allocator, contents: []const u8) ![]LoadedKeymap {
+fn runtimeAction(action: SerializedAction) ?Action {
+    return switch (action) {
+        .edge_left => .edge_left,
+        .edge_right => .edge_right,
+        .edge_top => .edge_top,
+        .edge_bottom => .edge_bottom,
+        .corner_top_left => .corner_top_left,
+        .corner_top_right => .corner_top_right,
+        .corner_bottom_left => .corner_bottom_left,
+        .corner_bottom_right => .corner_bottom_right,
+        .maximize => .maximize,
+        .center => .center,
+        .store_snapshot => .store_snapshot,
+        .recall_snapshot => .recall_snapshot,
+        .always_on_top => null,
+    };
+}
+
+fn serializedAction(action: Action) SerializedAction {
+    return switch (action) {
+        .edge_left => .edge_left,
+        .edge_right => .edge_right,
+        .edge_top => .edge_top,
+        .edge_bottom => .edge_bottom,
+        .corner_top_left => .corner_top_left,
+        .corner_top_right => .corner_top_right,
+        .corner_bottom_left => .corner_bottom_left,
+        .corner_bottom_right => .corner_bottom_right,
+        .maximize => .maximize,
+        .center => .center,
+        .store_snapshot => .store_snapshot,
+        .recall_snapshot => .recall_snapshot,
+    };
+}
+
+fn parseSettings(allocator: std.mem.Allocator, contents: []const u8) !ParsedSettings {
     const parsed = try std.json.parseFromSlice(Settings, allocator, contents, .{ .allocate = .alloc_always });
     defer parsed.deinit();
     if (parsed.value.keymaps.len > 256) return error.TooManyKeymaps;
 
-    const loaded = try allocator.alloc(LoadedKeymap, parsed.value.keymaps.len);
+    var active_count: usize = 0;
+    for (parsed.value.keymaps) |keymap| {
+        if (runtimeAction(keymap.action) != null) active_count += 1;
+    }
+    const loaded = try allocator.alloc(LoadedKeymap, active_count);
     errdefer allocator.free(loaded);
-    for (parsed.value.keymaps, loaded) |keymap, *result| {
-        const is_snapshot = keymap.action == .store_snapshot or keymap.action == .recall_snapshot;
+    var loaded_index: usize = 0;
+    for (parsed.value.keymaps) |keymap| {
+        const action = runtimeAction(keymap.action) orelse continue;
+        const is_snapshot = action == .store_snapshot or action == .recall_snapshot;
         if (is_snapshot and keymap.snapshot_index == null) return error.MissingSnapshotIndex;
         if (!is_snapshot and keymap.snapshot_index != null) return error.UnexpectedSnapshotIndex;
 
@@ -154,14 +241,31 @@ pub fn parse(allocator: std.mem.Allocator, contents: []const u8) ![]LoadedKeymap
             .shift => mod_shift,
             .win => mod_win,
         };
-        result.* = .{
+        loaded[loaded_index] = .{
             .modifiers = modifiers,
             .key = try keyCode(keymap.key),
-            .action = keymap.action,
+            .action = action,
             .snapshot_index = keymap.snapshot_index orelse 0,
         };
+        loaded_index += 1;
     }
-    return loaded;
+    return .{
+        .keymaps = loaded,
+        .migrated = active_count != parsed.value.keymaps.len,
+    };
+}
+
+pub fn parse(allocator: std.mem.Allocator, contents: []const u8) ![]LoadedKeymap {
+    return (try parseSettings(allocator, contents)).keymaps;
+}
+
+fn loadDefaultKeymaps(allocator: std.mem.Allocator) ![]LoadedKeymap {
+    const contents = try std.fmt.allocPrint(allocator, "{f}", .{std.json.fmt(
+        Settings{ .keymaps = &default_keymaps },
+        .{},
+    )});
+    defer allocator.free(contents);
+    return parse(allocator, contents);
 }
 
 pub fn save(
@@ -193,7 +297,7 @@ pub fn save(
         output.* = .{
             .modifiers = modifiers[0..modifier_count],
             .key = keyName(keymap.key, key_buffer),
-            .action = keymap.action,
+            .action = serializedAction(keymap.action),
             .snapshot_index = if (keymap.action == .store_snapshot or keymap.action == .recall_snapshot)
                 keymap.snapshot_index
             else
@@ -290,6 +394,22 @@ test "parses keymaps" {
     try std.testing.expectEqual(@as(u32, mod_win | mod_shift), keymaps[0].modifiers);
     try std.testing.expectEqual(@as(u32, 0x25), keymaps[0].key);
     try std.testing.expectEqual(Action.recall_snapshot, keymaps[1].action);
+}
+
+test "deprecated keymaps are removed during migration" {
+    const contents =
+        \\{"keymaps":[
+        \\  {"modifiers":["win"],"key":"left","action":"edge_left"},
+        \\  {"modifiers":["win","alt"],"key":"a","action":"always_on_top"},
+        \\  {"modifiers":["win"],"key":"1","action":"recall_snapshot","snapshot_index":0}
+        \\]}
+    ;
+    const parsed = try parseSettings(std.testing.allocator, contents);
+    defer std.testing.allocator.free(parsed.keymaps);
+    try std.testing.expect(parsed.migrated);
+    try std.testing.expectEqual(@as(usize, 2), parsed.keymaps.len);
+    try std.testing.expectEqual(Action.edge_left, parsed.keymaps[0].action);
+    try std.testing.expectEqual(Action.recall_snapshot, parsed.keymaps[1].action);
 }
 
 test "default keymaps round trip through JSON" {

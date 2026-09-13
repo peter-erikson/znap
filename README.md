@@ -20,8 +20,7 @@ A dependency-free hotkey oriented window manager for Windows 10 & 11 inspired by
 | Cycle the bottom-right corner through 1/2, 2/3, and 1/3 width | `Win` + `Page Down` |
 | Cycle a centered, full-height window through 1/2, 2/3, and 1/3 width | `Win` + `\` |
 | Toggle maximize, restoring the previous state or a centered state if unknown | `Win` + `Enter` |
-| Toggle always-on-top | `Win` + `Alt` + `A` |
-| Store the currently fully visible windows and window focus in snapshot 1–9 or 0 (ignoring always-on-top overlays) | `Win` + `Alt` + `1`–`9` or `0` |
+| Store the currently fully visible windows and window focus in snapshot 1–9 or 0 | `Win` + `Alt` + `1`–`9` or `0` |
 | Recall snapshot 1–9 or 0, raise its windows, promote them in Alt+Tab, and restore focus | `Win` + `1`–`9` or `0` |
 
 The notification-area menu opens the settings dialog, links to the original documentation, and exits the application.

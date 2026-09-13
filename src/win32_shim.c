@@ -364,6 +364,7 @@ void ZnapShowSnapWarning(HINSTANCE instance) {
 #define ZNAP_STARTUP_NORMAL 3003
 #define ZNAP_STARTUP_ADMIN 3004
 #define ZNAP_KEYMAP_CONTROL_BASE 4000
+#define ZNAP_ACTION_STORE_SNAPSHOT 10
 #define ZNAP_MAX_KEYMAPS 256
 #define ZNAP_CAPTURE_KEYMAP (WM_APP + 20)
 #define ZNAP_TOOLTIP_TIMER 1
@@ -675,7 +676,6 @@ static const WCHAR *ZnapActionLabel(UINT action) {
         case 7: return L"Snap/cycle bottom-right corner:";
         case 8: return L"Maximize/restore:";
         case 9: return L"Cycle center window:";
-        case 10: return L"Always on top:";
         default: return L"Keymap:";
     }
 }
@@ -1315,7 +1315,7 @@ void ZnapShowSettingsDialog(HINSTANCE instance, HWND owner, const ZnapKeymapRow 
         WCHAR snapshot_label[64];
         const WCHAR *label = ZnapActionLabel(rows[row].action);
         if (row >= general_count) {
-            wsprintfW(snapshot_label, rows[row].action == 11 ? L"Store snapshot %u:" : L"Recall snapshot %u:", rows[row].snapshot_index + 1);
+            wsprintfW(snapshot_label, rows[row].action == ZNAP_ACTION_STORE_SNAPSHOT ? L"Store snapshot %u:" : L"Recall snapshot %u:", rows[row].snapshot_index + 1);
             label = snapshot_label;
         }
         ZnapCreateSettingsControl(0, L"STATIC", label, SS_RIGHT, 20, y + 4, label_width, 22, znap_keybinds_page, 0);
