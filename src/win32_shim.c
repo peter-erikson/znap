@@ -820,9 +820,24 @@ static LRESULT CALLBACK ZnapLargeCheckboxProc(HWND control, UINT message, WPARAM
     return DefSubclassProc(control, message, wparam, lparam);
 }
 
+static int ZnapLargeCheckboxWidth(const WCHAR *text, HWND parent) {
+    SIZE text_size = {0};
+    HDC dc = GetDC(parent);
+    if (dc != NULL) {
+        HFONT previous_font = znap_settings_font != NULL ? SelectObject(dc, znap_settings_font) : NULL;
+        GetTextExtentPoint32W(dc, text, lstrlenW(text), &text_size);
+        if (previous_font != NULL) SelectObject(dc, previous_font);
+        ReleaseDC(parent, dc);
+    }
+    const int text_width = text_size.cx > 0
+        ? MulDiv(text_size.cx, 96, (int)znap_settings_dpi)
+        : lstrlenW(text) * 8;
+    return ZNAP_CHECKBOX_SIZE + 10 + text_width + 6;
+}
+
 static HWND ZnapCreateLargeCheckbox(const WCHAR *text, int y, HWND parent, UINT id) {
     HWND checkbox = ZnapCreateSettingsControl(0, L"BUTTON", text, BS_AUTOCHECKBOX | WS_TABSTOP,
-        28, y, 620, ZNAP_CHECKBOX_HEIGHT, parent, id);
+        28, y, ZnapLargeCheckboxWidth(text, parent), ZNAP_CHECKBOX_HEIGHT, parent, id);
     if (checkbox != NULL) SetWindowSubclass(checkbox, ZnapLargeCheckboxProc, id, 0);
     return checkbox;
 }
