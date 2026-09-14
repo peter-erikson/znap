@@ -4,74 +4,73 @@
 
 # Znap
 
-A dependency-free hotkey oriented window manager for Windows 10 & 11 inspired by Rectangle for MacOS, with additional window layout snapshot store/recall functionality. 
+Znap is a fast, hotkey-driven window manager for Windows 10 and 11. Snap windows to screen edges and corners, cycle through useful sizes, or save and restore complete window layouts—all from a single dependency-free executable.
 
-## Default Hotkeys
+## What Znap does
+
+- Snaps windows to an edge or corner and cycles through configurable sizes when you repeat the shortcut.
+- Centers and maximizes windows without reaching for the mouse.
+- Stores and recalls up to ten window-layout snapshots, including window order and focus.
+- Uses Smart fill to select an enabled size that best fits the unobscured space beside other snapped windows.
+- Lets you customize every shortcut and choose the available and default snap sizes.
+
+## Install and start
+
+Place `Znap.exe` anywhere you like and run it. Znap stays in the Windows notification area; right-click its icon to open Settings or Documentation, or to exit.
+
+Znap uses several `Win` + arrow shortcuts that overlap with Windows' built-in Snap windows feature. When that feature is enabled, Znap provides a link to the relevant Windows setting so you can disable it for more predictable behavior.
+
+## Default shortcuts
 
 | Action | Shortcut |
 | --- | --- |
-| Cycle the left edge through 1/2, 2/3, and 1/3 width | `Win` + `Left` |
-| Cycle the right edge through 1/2, 2/3, and 1/3 width | `Win` + `Right` |
-| Cycle the top edge through 1/2, 2/3, and 1/3 height | `Win` + `Up` |
-| Cycle the bottom edge through 1/2, 2/3, and 1/3 height | `Win` + `Down` |
-| Cycle the top-left corner through 1/2, 2/3, and 1/3 width | `Win` + `Insert` |
-| Cycle the top-right corner through 1/2, 2/3, and 1/3 width | `Win` + `Page Up` |
-| Cycle the bottom-left corner through 1/2, 2/3, and 1/3 width | `Win` + `Delete` |
-| Cycle the bottom-right corner through 1/2, 2/3, and 1/3 width | `Win` + `Page Down` |
-| Cycle a centered, full-height window through 1/2, 2/3, and 1/3 width | `Win` + `\` |
-| Toggle maximize, restoring the previous state or a centered state if unknown | `Win` + `Enter` |
-| Store the currently fully visible windows and window focus in snapshot 1–9 or 0 | `Win` + `Alt` + `1`–`9` or `0` |
-| Recall snapshot 1–9 or 0, raise its windows, promote them in Alt+Tab, and restore focus | `Win` + `1`–`9` or `0` |
+| Snap/cycle left edge | `Win` + `Left` |
+| Snap/cycle right edge | `Win` + `Right` |
+| Snap/cycle top edge | `Win` + `Up` |
+| Snap/cycle bottom edge | `Win` + `Down` |
+| Snap/cycle top-left corner | `Win` + `Insert` |
+| Snap/cycle top-right corner | `Win` + `Page Up` |
+| Snap/cycle bottom-left corner | `Win` + `Delete` |
+| Snap/cycle bottom-right corner | `Win` + `Page Down` |
+| Center and cycle width | `Win` + `\` |
+| Maximize/restore | `Win` + `Enter` |
+| Store snapshot 1–9 or 0 | `Win` + `Alt` + `1`–`9` or `0` |
+| Recall snapshot 1–9 or 0 | `Win` + `1`–`9` or `0` |
 
-The notification-area menu opens the settings dialog, links to the original documentation, and exits the application.
-Successfully stored windows briefly wiggle down and back up as confirmation.
+Repeated snap shortcuts cycle through the enabled sizes. By default, Znap starts at one-half and cycles through two-thirds and one-third. A stored layout briefly moves its windows down and back as confirmation.
 
 ## Settings
 
-Select **Settings** from Znap's notification-area menu. The **General** page contains the startup and Windows snapping options, plus configurable edge, corner, and center cycle widths. Each cycle must have at least one width enabled and has a selectable default width used for the first snap. Smart edge and corner fill can use a complementary enabled width when another unobscured snapped window leaves a matching amount of space. The **Keybinds** page lists the window-management and snapshot shortcut groups vertically and scrolls when they exceed the available space. Click a shortcut field, then press a non-modifier key while holding at least one modifier key (`Win`, `Ctrl`, `Alt`, or `Shift`) to record the new shortcut. Press `Backspace` while recording to clear a shortcut.
+Open **Settings** from Znap's notification-area menu. Changes are saved immediately.
 
-Changes are saved immediately to `%USERPROFILE%\.config\znap\settings.json` and loaded the next time Znap starts. Assigning a shortcut that is already used by another Znap action clears the duplicate assignment. A yellow warning icon identifies shortcuts that collide with a global Windows shortcut; hover over it for more information.
+### General
 
-When Windows window snapping is enabled, the dialog also provides a warning and a shortcut to the relevant Windows settings page.
+Choose how Znap starts with Windows, enable Smart fill, and configure the sizes used for edge, corner, and center cycles. Each group must have at least one enabled size, and its **Default width** is used for the first snap when Smart fill does not find a match.
 
-The settings window follows the Windows light, dark, and high-contrast themes, uses system UI fonts, and rescales when moved between displays with different DPI settings.
+The two startup modes are mutually exclusive but always selectable. **Run on startup as administrator** requires administrator approval and also lets Znap snap application windows running with elevated privileges.
 
-![Znap settings dialog](assets/settings_dialog.png)
+![Znap General settings](assets/settings_general.png)
 
-## Run on startup
+### Keybinds
 
-The **General** settings page provides two startup modes:
+Click a shortcut field, then press a non-modifier key while holding at least one modifier (`Win`, `Ctrl`, `Alt`, or `Shift`). Press `Backspace` while recording to clear the shortcut.
 
-- **Run on startup** launches Znap with normal user privileges through the current user's startup registry entry. This mode does not require administrator approval.
-- **Run on startup (as administrator)** launches Znap with the current user's highest available privileges through Task Scheduler. Windows asks for administrator approval when this setting is changed.
+Assigning a shortcut already used by another Znap action clears the duplicate. A blue information icon indicates that a shortcut overlaps a global Windows shortcut; hover over it for details.
 
-The modes are mutually exclusive. Administrator startup takes precedence and temporarily disables the normal startup option until it is turned off. The administrator task waits briefly after sign-in for Explorer's notification area to become available.
+![Znap Keybind settings](assets/settings_keybinds.png)
 
-## Build
+The settings window follows the Windows light, dark, and high-contrast themes and supports display scaling.
 
-Install Zig 0.16.0, then run:
+## Build from source
+
+Install Zig 0.16.0 and run:
 
 ```powershell
 zig build -Doptimize=ReleaseSafe
 ```
 
-The executable is written to `zig-out/bin/Znap.exe`. No external dependencies are required.
-
-Run the unit tests with:
-
-```powershell
-zig build test
-```
-
-## Install / Start
-
-Save Znap.exe anywhere on your hard drive and run it (if you build from source you can just keep it in the projects zig-out folder).
-
-## Implementation
-
-The application calls Win32 directly. Its C declarations are generated at build time with Zig's `addTranslateC`; window geometry and saved maximize states are kept in platform-independent modules with unit tests. It uses per-monitor-v2 DPI awareness, DWM extended frame bounds, monitor work areas, a low-level keyboard hook, a native notification-area icon, and the current-user `Run` registry key.
+The executable is written to `zig-out/bin/Znap.exe`.
 
 ## License and attribution
 
-The window snapping functionality is a Zig-language port of RectangleWin by Ahmet Alp Balkan. It preserves the upstream behavior and is distributed under the Apache License 2.0. See [LICENSE](LICENSE) and [NOTICE](NOTICE).
-
+Znap's window-snapping functionality is a Zig port of RectangleWin by Ahmet Alp Balkan. It preserves the upstream behavior and is distributed under the Apache License 2.0. See [LICENSE](LICENSE) and [NOTICE](NOTICE).
