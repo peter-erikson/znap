@@ -722,7 +722,7 @@ static const WCHAR *ZnapActionLabel(UINT action) {
         case 6: return L"Snap/cycle bottom-left corner:";
         case 7: return L"Snap/cycle bottom-right corner:";
         case 8: return L"Maximize/restore:";
-        case 9: return L"Cycle center window:";
+        case 9: return L"Cycle center screen:";
         default: return L"Keymap:";
     }
 }
