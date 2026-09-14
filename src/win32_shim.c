@@ -365,7 +365,7 @@ void ZnapShowSnapWarning(HINSTANCE instance) {
 #define ZNAP_STARTUP_ADMIN 3004
 #define ZNAP_CYCLE_WIDTH_BASE 3100
 #define ZNAP_CYCLE_DEFAULT_BASE 3120
-#define ZNAP_SMART_FILL_BASE 3130
+#define ZNAP_SMART_FILL 3130
 #define ZNAP_CYCLE_GROUP_COUNT 3
 #define ZNAP_CYCLE_WIDTH_COUNT 5
 #define ZNAP_KEYMAP_CONTROL_BASE 4000
@@ -380,6 +380,7 @@ void ZnapShowSnapWarning(HINSTANCE instance) {
 #define ZNAP_SECTION_FONT_POINTS 13
 #define ZNAP_SECTION_CONTENT_PADDING 6
 #define ZNAP_SECTION_GAP 16
+#define ZNAP_GENERAL_SECTION_GAP 34
 #define ZNAP_NAVIGATION_WIDTH 210
 #define ZNAP_NAVIGATION_ITEM_HEIGHT 44
 #define ZNAP_KEYMAP_CONTROL_HEIGHT 27
@@ -407,7 +408,7 @@ static HWND znap_keybinds_page = NULL;
 static HWND znap_startup_normal = NULL;
 static HWND znap_startup_admin = NULL;
 static HWND znap_startup_info = NULL;
-static HWND znap_smart_fill_info[2] = {NULL};
+static HWND znap_smart_fill_info = NULL;
 static HWND znap_cycle_widths[ZNAP_CYCLE_GROUP_COUNT][ZNAP_CYCLE_WIDTH_COUNT] = {{NULL}};
 static HWND znap_cycle_default_boxes[ZNAP_CYCLE_GROUP_COUNT] = {NULL};
 static UINT znap_cycle_defaults[ZNAP_CYCLE_GROUP_COUNT] = {2, 2, 2};
@@ -562,10 +563,8 @@ static void ZnapRefreshSettingsFonts(HWND window) {
         if (znap_startup_info != NULL) {
             SendMessageW(znap_startup_info, WM_SETFONT, (WPARAM)info_text_font, TRUE);
         }
-        for (UINT group = 0; group < 2; group++) {
-            if (znap_smart_fill_info[group] != NULL) {
-                SendMessageW(znap_smart_fill_info[group], WM_SETFONT, (WPARAM)info_text_font, TRUE);
-            }
+        if (znap_smart_fill_info != NULL) {
+            SendMessageW(znap_smart_fill_info, WM_SETFONT, (WPARAM)info_text_font, TRUE);
         }
         if (znap_info_text_font != NULL) DeleteObject(znap_info_text_font);
         znap_info_text_font = info_text_font;
@@ -1251,11 +1250,10 @@ static LRESULT CALLBACK ZnapSettingsProc(HWND window, UINT message, WPARAM wpara
                 }
                 return 0;
             }
-            if (id >= ZNAP_SMART_FILL_BASE && id < ZNAP_SMART_FILL_BASE + 2 && notification == BN_CLICKED) {
+            if (id == ZNAP_SMART_FILL && notification == BN_CLICKED) {
                 HWND checkbox = (HWND)lparam;
-                const UINT group = id - ZNAP_SMART_FILL_BASE;
                 const BOOL enabled = SendMessageW(checkbox, BM_GETCHECK, 0, 0) == BST_CHECKED;
-                if (!ZnapUpdateSmartFill(group, enabled)) {
+                if (!ZnapUpdateSmartFill(enabled)) {
                     SendMessageW(checkbox, BM_SETCHECK, enabled ? BST_UNCHECKED : BST_CHECKED, 0);
                     MessageBoxW(window, L"The smart fill setting could not be saved. The previous selection has been restored.", L"Znap Settings", MB_OK | MB_ICONERROR);
                 }
@@ -1407,7 +1405,7 @@ static LRESULT CALLBACK ZnapSettingsProc(HWND window, UINT message, WPARAM wpara
             znap_startup_normal = NULL;
             znap_startup_admin = NULL;
             znap_startup_info = NULL;
-            ZeroMemory(znap_smart_fill_info, sizeof(znap_smart_fill_info));
+            znap_smart_fill_info = NULL;
             ZeroMemory(znap_cycle_widths, sizeof(znap_cycle_widths));
             ZeroMemory(znap_cycle_default_boxes, sizeof(znap_cycle_default_boxes));
             znap_section_header_count = 0;
@@ -1442,7 +1440,7 @@ static void ZnapEnsureSettingsClass(HINSTANCE instance) {
     RegisterClassExW(&page_class);
 }
 
-void ZnapShowSettingsDialog(HINSTANCE instance, HWND owner, const ZnapKeymapRow *rows, UINT row_count, UINT general_count, BOOL show_snap_warning, BOOL startup_enabled, BOOL admin_startup_enabled, UINT edge_cycles, UINT corner_cycles, UINT center_cycles, UINT default_edge_cycle_width, UINT default_corner_cycle_width, UINT default_center_cycle_width, BOOL smart_edge_fill, BOOL smart_corner_fill) {
+void ZnapShowSettingsDialog(HINSTANCE instance, HWND owner, const ZnapKeymapRow *rows, UINT row_count, UINT general_count, BOOL show_snap_warning, BOOL startup_enabled, BOOL admin_startup_enabled, UINT edge_cycles, UINT corner_cycles, UINT center_cycles, UINT default_edge_cycle_width, UINT default_corner_cycle_width, UINT default_center_cycle_width, BOOL smart_fill) {
     if (znap_settings_window != NULL) {
         ShowWindow(znap_settings_window, SW_RESTORE);
         SetForegroundWindow(znap_settings_window);
@@ -1515,6 +1513,19 @@ void ZnapShowSettingsDialog(HINSTANCE instance, HWND owner, const ZnapKeymapRow 
     if (znap_startup_info != NULL && znap_info_text_font != NULL) {
         SendMessageW(znap_startup_info, WM_SETFONT, (WPARAM)znap_info_text_font, TRUE);
     }
+
+    const WCHAR *smart_fill_info_text = L"When Smart fill is enabled, Znap selects an enabled cycle width that best fills the unobscured space along the edge or corner where the window is snapped. If no width matches, the default width is used.";
+    const int smart_fill_y = startup_y + 160 + ZNAP_SECTION_GAP;
+    ZnapCreateSettingsHeader(L"Smart fill", smart_fill_y, znap_general_page);
+    HWND smart_fill_checkbox = ZnapCreateLargeCheckbox(L"Enable Smart fill",
+        smart_fill_y + 36, znap_general_page, ZNAP_SMART_FILL);
+    SendMessageW(smart_fill_checkbox, BM_SETCHECK, smart_fill ? BST_CHECKED : BST_UNCHECKED, 0);
+    znap_smart_fill_info = ZnapCreateSettingsControl(0, L"STATIC", smart_fill_info_text,
+        SS_LEFT, 58, smart_fill_y + 72, 600, 54, znap_general_page, 0);
+    if (znap_smart_fill_info != NULL && znap_info_text_font != NULL) {
+        SendMessageW(znap_smart_fill_info, WM_SETFONT, (WPARAM)znap_info_text_font, TRUE);
+    }
+
     const WCHAR *cycle_titles[ZNAP_CYCLE_GROUP_COUNT] = {
         L"Edge snap/cycle widths",
         L"Corner snap/cycle widths",
@@ -1522,10 +1533,7 @@ void ZnapShowSettingsDialog(HINSTANCE instance, HWND owner, const ZnapKeymapRow 
     };
     const UINT cycle_masks[ZNAP_CYCLE_GROUP_COUNT] = { edge_cycles, corner_cycles, center_cycles };
     const UINT cycle_defaults[ZNAP_CYCLE_GROUP_COUNT] = { default_edge_cycle_width, default_corner_cycle_width, default_center_cycle_width };
-    const BOOL smart_fills[2] = { smart_edge_fill, smart_corner_fill };
-    const WCHAR *smart_fill_labels[2] = { L"Smart fill", L"Smart fill" };
-    const WCHAR *smart_fill_info_text = L"When Smart fill is enabled, Znap selects an enabled cycle width that best fills the unobscured space along the edge or corner where the window is snapped. If no width matches, the default width is used.";
-    int cycle_y = startup_y + 160 + ZNAP_SECTION_GAP;
+    int cycle_y = smart_fill_y + 126 + ZNAP_GENERAL_SECTION_GAP;
     for (UINT group = 0; group < ZNAP_CYCLE_GROUP_COUNT; group++) {
         znap_cycle_defaults[group] = cycle_defaults[group] < ZNAP_CYCLE_WIDTH_COUNT ? cycle_defaults[group] : 2;
         ZnapCreateSettingsHeader(cycle_titles[group], cycle_y, znap_general_page);
@@ -1541,18 +1549,7 @@ void ZnapShowSettingsDialog(HINSTANCE instance, HWND owner, const ZnapKeymapRow 
             136, cycle_y + 206, 160, 200, znap_general_page, ZNAP_CYCLE_DEFAULT_BASE + group);
         ZnapDisableCycleDefaultMouseWheel(znap_cycle_default_boxes[group], ZNAP_CYCLE_DEFAULT_BASE + group, znap_general_page);
         ZnapRefreshCycleDefaultBox(group);
-        if (group < 2) {
-            HWND smart_fill = ZnapCreateLargeCheckbox(smart_fill_labels[group], cycle_y + 242, znap_general_page, ZNAP_SMART_FILL_BASE + group);
-            SendMessageW(smart_fill, BM_SETCHECK, smart_fills[group] ? BST_CHECKED : BST_UNCHECKED, 0);
-            znap_smart_fill_info[group] = ZnapCreateSettingsControl(0, L"STATIC", smart_fill_info_text,
-                SS_LEFT, 58, cycle_y + 278, 600, 54, znap_general_page, 0);
-            if (znap_smart_fill_info[group] != NULL && znap_info_text_font != NULL) {
-                SendMessageW(znap_smart_fill_info[group], WM_SETFONT, (WPARAM)znap_info_text_font, TRUE);
-            }
-            cycle_y += 332 + ZNAP_SECTION_GAP;
-        } else {
-            cycle_y += 236 + ZNAP_SECTION_GAP;
-        }
+        cycle_y += 239 + ZNAP_GENERAL_SECTION_GAP;
     }
     znap_general_content_height = cycle_y;
 

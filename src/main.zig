@@ -60,8 +60,7 @@ var center_cycle_mask: u8 = settings.default_cycle_mask;
 var default_edge_cycle_width: settings.CycleWidth = settings.default_cycle_width;
 var default_corner_cycle_width: settings.CycleWidth = settings.default_cycle_width;
 var default_center_cycle_width: settings.CycleWidth = settings.default_cycle_width;
-var smart_edge_fill = true;
-var smart_corner_fill = true;
+var smart_fill = true;
 var last_snap: ?SnapIdentity = null;
 var app_io: std.Io = undefined;
 var app_allocator: std.mem.Allocator = undefined;
@@ -133,8 +132,7 @@ pub fn main(init: std.process.Init) !void {
     default_edge_cycle_width = loaded_settings.default_edge_cycle_width;
     default_corner_cycle_width = loaded_settings.default_corner_cycle_width;
     default_center_cycle_width = loaded_settings.default_center_cycle_width;
-    smart_edge_fill = loaded_settings.smart_edge_fill;
-    smart_corner_fill = loaded_settings.smart_corner_fill;
+    smart_fill = loaded_settings.smart_fill;
     settings_file_path = loaded_settings.path;
 
     const instance = c.GetModuleHandleW(null);
@@ -847,7 +845,7 @@ fn cycleEdge(index: usize) void {
     if (hwnd == null) return;
     const snap: SnapIdentity = .{ .window = @intFromPtr(hwnd.?), .action = edge_snap_actions[index] };
     var configured: [settings.cycle_width_count]geometry.Placement = undefined;
-    const smart_request: ?SmartFillRequest = if (smart_edge_fill) smartEdgeRequest(index) else null;
+    const smart_request: ?SmartFillRequest = if (smart_fill) smartEdgeRequest(index) else null;
     const placement = nextWindowCyclePlacement(hwnd, configuredCycle(&edge_cycles[index], edge_cycle_mask, default_edge_cycle_width, &configured), smart_request, snapTransition(last_snap, snap));
     if (resizeWindow(hwnd, placement)) last_snap = snap;
 }
@@ -857,7 +855,7 @@ fn cycleCorner(index: usize) void {
     if (hwnd == null) return;
     const snap: SnapIdentity = .{ .window = @intFromPtr(hwnd.?), .action = corner_snap_actions[index] };
     var configured: [settings.cycle_width_count]geometry.Placement = undefined;
-    const smart_request: ?SmartFillRequest = if (smart_corner_fill) smartCornerRequest(index) else null;
+    const smart_request: ?SmartFillRequest = if (smart_fill) smartCornerRequest(index) else null;
     const placement = nextWindowCyclePlacement(hwnd, configuredCycle(&corner_cycles[index], corner_cycle_mask, default_corner_cycle_width, &configured), smart_request, snapTransition(last_snap, snap));
     if (resizeWindow(hwnd, placement)) last_snap = snap;
 }
@@ -1096,8 +1094,7 @@ fn showSettingsDialog(owner: c.HWND) void {
         @intFromEnum(default_edge_cycle_width),
         @intFromEnum(default_corner_cycle_width),
         @intFromEnum(default_center_cycle_width),
-        if (smart_edge_fill) c.TRUE else c.FALSE,
-        if (smart_corner_fill) c.TRUE else c.FALSE,
+        if (smart_fill) c.TRUE else c.FALSE,
     );
 }
 
@@ -1140,8 +1137,7 @@ fn saveSettings() !void {
         default_edge_cycle_width,
         default_corner_cycle_width,
         default_center_cycle_width,
-        smart_edge_fill,
-        smart_corner_fill,
+        smart_fill,
     );
 }
 
@@ -1210,16 +1206,11 @@ pub export fn ZnapUpdateDefaultCycleWidth(group: c.UINT, width: c.UINT) c.BOOL {
     return c.TRUE;
 }
 
-pub export fn ZnapUpdateSmartFill(group: c.UINT, enabled: c.BOOL) c.BOOL {
-    const setting = switch (group) {
-        0 => &smart_edge_fill,
-        1 => &smart_corner_fill,
-        else => return c.FALSE,
-    };
-    const previous = setting.*;
-    setting.* = enabled != 0;
+pub export fn ZnapUpdateSmartFill(enabled: c.BOOL) c.BOOL {
+    const previous = smart_fill;
+    smart_fill = enabled != 0;
     saveSettings() catch |err| {
-        setting.* = previous;
+        smart_fill = previous;
         std.log.err("failed to save smart fill setting: {s}", .{@errorName(err)});
         return c.FALSE;
     };
