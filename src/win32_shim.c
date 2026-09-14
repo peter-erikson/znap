@@ -880,6 +880,38 @@ static void ZnapRefreshCycleDefaultBox(UINT group) {
     SendMessageW(combo, CB_SETCURSEL, selected_item, 0);
 }
 
+static LRESULT CALLBACK ZnapCycleDefaultComboProc(HWND control, UINT message, WPARAM wparam, LPARAM lparam, UINT_PTR subclass_id, DWORD_PTR reference_data) {
+    switch (message) {
+        case WM_MOUSEWHEEL: {
+            const UINT group = (UINT)(subclass_id - ZNAP_CYCLE_DEFAULT_BASE);
+            HWND combo = group < ZNAP_CYCLE_GROUP_COUNT ? znap_cycle_default_boxes[group] : NULL;
+            if (combo != NULL && SendMessageW(combo, CB_GETDROPPEDSTATE, 0, 0)) {
+                SendMessageW(combo, CB_SHOWDROPDOWN, FALSE, 0);
+                return 0;
+            }
+            SendMessageW((HWND)reference_data, WM_MOUSEWHEEL, wparam, lparam);
+            return 0;
+        }
+        case WM_NCDESTROY:
+            RemoveWindowSubclass(control, ZnapCycleDefaultComboProc, subclass_id);
+            break;
+        default:
+            break;
+    }
+    return DefSubclassProc(control, message, wparam, lparam);
+}
+
+static void ZnapDisableCycleDefaultMouseWheel(HWND combo, UINT_PTR subclass_id, HWND scroll_page) {
+    if (combo == NULL) return;
+    SetWindowSubclass(combo, ZnapCycleDefaultComboProc, subclass_id, (DWORD_PTR)scroll_page);
+
+    COMBOBOXINFO info = {0};
+    info.cbSize = sizeof(info);
+    if (GetComboBoxInfo(combo, &info) && info.hwndList != NULL) {
+        SetWindowSubclass(info.hwndList, ZnapCycleDefaultComboProc, subclass_id, (DWORD_PTR)scroll_page);
+    }
+}
+
 static void ZnapDrawCollisionTooltip(HWND tooltip, HDC dc) {
     RECT client;
     GetClientRect(tooltip, &client);
@@ -1492,7 +1524,7 @@ void ZnapShowSettingsDialog(HINSTANCE instance, HWND owner, const ZnapKeymapRow 
     const UINT cycle_defaults[ZNAP_CYCLE_GROUP_COUNT] = { default_edge_cycle_width, default_corner_cycle_width, default_center_cycle_width };
     const BOOL smart_fills[2] = { smart_edge_fill, smart_corner_fill };
     const WCHAR *smart_fill_labels[2] = { L"Smart fill", L"Smart fill" };
-    const WCHAR *smart_fill_info_text = L"Smart fill tries to match any of the enabled cycle widths to any unobscured space along the edge/corner a window is snapped to, and picks the best match as the first cycle width. If no match is found, the default width is selected.";
+    const WCHAR *smart_fill_info_text = L"When Smart fill is enabled, Znap selects an enabled cycle width that best fills the unobscured space along the edge or corner where the window is snapped. If no width matches, the default width is used.";
     int cycle_y = startup_y + 160 + ZNAP_SECTION_GAP;
     for (UINT group = 0; group < ZNAP_CYCLE_GROUP_COUNT; group++) {
         znap_cycle_defaults[group] = cycle_defaults[group] < ZNAP_CYCLE_WIDTH_COUNT ? cycle_defaults[group] : 2;
@@ -1507,6 +1539,7 @@ void ZnapShowSettingsDialog(HINSTANCE instance, HWND owner, const ZnapKeymapRow 
         znap_cycle_default_boxes[group] = ZnapCreateSettingsControl(0, L"COMBOBOX", L"",
             CBS_DROPDOWNLIST | CBS_HASSTRINGS | WS_VSCROLL | WS_TABSTOP,
             136, cycle_y + 206, 160, 200, znap_general_page, ZNAP_CYCLE_DEFAULT_BASE + group);
+        ZnapDisableCycleDefaultMouseWheel(znap_cycle_default_boxes[group], ZNAP_CYCLE_DEFAULT_BASE + group, znap_general_page);
         ZnapRefreshCycleDefaultBox(group);
         if (group < 2) {
             HWND smart_fill = ZnapCreateLargeCheckbox(smart_fill_labels[group], cycle_y + 242, znap_general_page, ZNAP_SMART_FILL_BASE + group);
