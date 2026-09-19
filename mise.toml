@@ -11,8 +11,34 @@ $ErrorActionPreference = 'Stop'
 
 $znapProcesses = Get-Process -Name 'Znap' -ErrorAction SilentlyContinue
 if ($znapProcesses) {
-    $znapProcesses | Stop-Process -Force
-    $znapProcesses | Wait-Process
+    $znapProcessIds = @($znapProcesses.Id)
+
+    try {
+        $znapProcesses | Stop-Process -Force -PassThru -ErrorAction Stop | Wait-Process
+    } catch {
+        $remainingProcesses = @(Get-Process -Id $znapProcessIds -ErrorAction SilentlyContinue)
+        if ($remainingProcesses.Count -gt 0) {
+            Write-Host 'Znap is elevated; requesting administrator permission to stop it...'
+
+            $idList = $remainingProcesses.Id -join ','
+            $killScript = "`$processes = Get-Process -Id $idList -ErrorAction SilentlyContinue; if (`$processes) { `$processes | Stop-Process -Force; `$processes | Wait-Process }"
+            $encodedKillScript = [Convert]::ToBase64String(
+                [Text.Encoding]::Unicode.GetBytes($killScript)
+            )
+            $elevatedProcess = Start-Process -FilePath 'powershell.exe' `
+                -ArgumentList '-NoProfile', '-NonInteractive', '-EncodedCommand', $encodedKillScript `
+                -Verb RunAs -Wait -PassThru
+
+            if ($elevatedProcess.ExitCode -ne 0) {
+                throw "Elevated process stop failed with exit code $($elevatedProcess.ExitCode)."
+            }
+        }
+    }
+
+    $remainingProcesses = @(Get-Process -Id $znapProcessIds -ErrorAction SilentlyContinue)
+    if ($remainingProcesses.Count -gt 0) {
+        throw 'Znap is still running after the stop attempt.'
+    }
 }
 
 zig build -Doptimize=ReleaseSafe
