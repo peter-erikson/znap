@@ -69,6 +69,9 @@ var app_allocator: std.mem.Allocator = undefined;
 var settings_file_path: []const u8 = &.{};
 
 const snapshot_capacity = 64;
+const snapshot_count = 10;
+const snapshot_window_capacity = snapshot_capacity * snapshot_count;
+const snapshot_text_capacity = 4096;
 const occluder_capacity = 1024;
 const snapshot_edge_overlap_tolerance: i32 = 2;
 const snapping_match_tolerance: i32 = 2;
@@ -76,13 +79,68 @@ const snapping_match_tolerance: i32 = 2;
 const SnapshotEntry = struct {
     hwnd: c.HWND,
     placement: c.WINDOWPLACEMENT,
+    application_index: u8 = 0,
+};
+
+const SnapshotText = struct {
+    bytes: [snapshot_text_capacity]u8 = undefined,
+    len: u16 = 0,
+
+    fn slice(self: *const SnapshotText) []const u8 {
+        return self.bytes[0..self.len];
+    }
+
+    fn setUtf8(self: *SnapshotText, value: []const u8) bool {
+        if (value.len > self.bytes.len) return false;
+        @memcpy(self.bytes[0..value.len], value);
+        self.len = @intCast(value.len);
+        return true;
+    }
+
+    fn setUtf16(self: *SnapshotText, value: [*:0]const u16) bool {
+        const wide_len: c_int = @intCast(std.mem.len(value));
+        if (wide_len == 0) {
+            self.len = 0;
+            return true;
+        }
+        const converted = c.WideCharToMultiByte(c.CP_UTF8, c.WC_ERR_INVALID_CHARS, value, wide_len, &self.bytes, self.bytes.len, null, null);
+        if (converted <= 0) return false;
+        self.len = @intCast(converted);
+        return true;
+    }
+
+    fn toUtf16(self: *const SnapshotText, buffer: []u16) bool {
+        if (buffer.len == 0) return false;
+        if (self.len == 0) {
+            buffer[0] = 0;
+            return true;
+        }
+        const converted = c.MultiByteToWideChar(c.CP_UTF8, c.MB_ERR_INVALID_CHARS, self.bytes[0..self.len].ptr, self.len, buffer.ptr, @intCast(buffer.len - 1));
+        if (converted <= 0) return false;
+        buffer[@intCast(converted)] = 0;
+        return true;
+    }
+};
+
+const SnapshotApplication = struct {
+    window_id: u64 = 0,
+    window_id_persisted: bool = false,
+    executable: SnapshotText = .{},
+    arguments: SnapshotText = .{},
+    working_directory: SnapshotText = .{},
+    app_user_model_id: SnapshotText = .{},
 };
 
 const WindowSnapshot = struct {
     entries: [snapshot_capacity]SnapshotEntry = undefined,
     count: usize = 0,
     focused: c.HWND = null,
+    focused_application: ?u8 = null,
+    applications: [snapshot_capacity]SnapshotApplication = undefined,
+    application_count: usize = 0,
+    auto_start: bool = false,
     stored: bool = false,
+    layout_persisted: bool = false,
 };
 
 const SnapshotCapture = struct {
@@ -99,7 +157,111 @@ const AnimationWindow = struct {
     top: i32,
 };
 
-var snapshots = [_]WindowSnapshot{.{}} ** 10;
+var snapshots = [_]WindowSnapshot{.{}} ** snapshot_count;
+const RuntimeWindow = struct {
+    window_id: u64,
+    hwnd: c.HWND,
+};
+var runtime_windows: [snapshot_window_capacity]RuntimeWindow = undefined;
+var runtime_window_count: usize = 0;
+var next_window_id: u64 = 1;
+
+fn allocateWindowId() u64 {
+    const result = next_window_id;
+    next_window_id +%= 1;
+    if (next_window_id == 0) next_window_id = 1;
+    return result;
+}
+
+fn loadWindowId(saved: u64) u64 {
+    if (saved == 0) return allocateWindowId();
+    if (saved >= next_window_id) {
+        next_window_id = saved +% 1;
+        if (next_window_id == 0) next_window_id = 1;
+    }
+    return saved;
+}
+
+fn hwndFromStoredValue(saved: u64) c.HWND {
+    if (saved == 0) return null;
+    const address = std.math.cast(usize, saved) orelse return null;
+    return @ptrFromInt(address);
+}
+
+fn loadSnapshotSettings(loaded: []const settings.Snapshot) void {
+    for (loaded) |saved| {
+        const snapshot_index: usize = saved.index;
+        if (snapshot_index >= snapshots.len) continue;
+        const snapshot = &snapshots[snapshot_index];
+        snapshot.application_count = @min(saved.applications.len, snapshot_capacity);
+        snapshot.auto_start = saved.auto_start;
+        snapshot.stored = true;
+        snapshot.count = 0;
+        snapshot.focused = null;
+        snapshot.focused_application = if (saved.focused_application) |index|
+            if (index < snapshot.application_count) index else null
+        else
+            null;
+        snapshot.layout_persisted = snapshot.application_count > 0;
+        for (saved.applications[0..snapshot.application_count], 0..) |application, index| {
+            snapshot.applications[index] = .{
+                .window_id = loadWindowId(application.window_id),
+                .window_id_persisted = application.window_id != 0,
+            };
+            _ = snapshot.applications[index].executable.setUtf8(application.executable);
+            _ = snapshot.applications[index].arguments.setUtf8(application.arguments);
+            _ = snapshot.applications[index].working_directory.setUtf8(application.working_directory);
+            _ = snapshot.applications[index].app_user_model_id.setUtf8(application.app_user_model_id);
+            if (application.placement) |placement| {
+                snapshot.entries[index] = .{
+                    .hwnd = hwndFromStoredValue(application.last_hwnd),
+                    .placement = placementFromSettings(placement),
+                    .application_index = @intCast(index),
+                };
+            } else {
+                snapshot.layout_persisted = false;
+            }
+        }
+        if (snapshot.layout_persisted) {
+            snapshot.count = snapshot.application_count;
+        } else {
+            // Settings written before window placements were persisted retain
+            // their launch metadata, but need one unrestricted recapture.
+            snapshot.focused_application = null;
+        }
+    }
+}
+
+fn placementFromSettings(saved: settings.SnapshotPlacement) c.WINDOWPLACEMENT {
+    return .{
+        .length = @sizeOf(c.WINDOWPLACEMENT),
+        .flags = saved.flags,
+        .showCmd = saved.show_command,
+        .ptMinPosition = .{ .x = saved.minimized_x, .y = saved.minimized_y },
+        .ptMaxPosition = .{ .x = saved.maximized_x, .y = saved.maximized_y },
+        .rcNormalPosition = .{
+            .left = saved.normal_left,
+            .top = saved.normal_top,
+            .right = saved.normal_right,
+            .bottom = saved.normal_bottom,
+        },
+    };
+}
+
+fn placementToSettings(placement: c.WINDOWPLACEMENT) settings.SnapshotPlacement {
+    return .{
+        .flags = placement.flags,
+        .show_command = placement.showCmd,
+        .minimized_x = placement.ptMinPosition.x,
+        .minimized_y = placement.ptMinPosition.y,
+        .maximized_x = placement.ptMaxPosition.x,
+        .maximized_y = placement.ptMaxPosition.y,
+        .normal_left = placement.rcNormalPosition.left,
+        .normal_top = placement.rcNormalPosition.top,
+        .normal_right = placement.rcNormalPosition.right,
+        .normal_bottom = placement.rcNormalPosition.bottom,
+    };
+}
 
 pub fn main(init: std.process.Init) !void {
     const args = try init.minimal.args.toSlice(init.arena.allocator());
@@ -136,6 +298,7 @@ pub fn main(init: std.process.Init) !void {
     default_center_cycle_width = loaded_settings.default_center_cycle_width;
     smart_fill = loaded_settings.smart_fill;
     settings_file_path = loaded_settings.path;
+    loadSnapshotSettings(loaded_settings.snapshots);
 
     const instance = c.GetModuleHandleW(null);
     taskbar_created_message = c.RegisterWindowMessageW(taskbar_created_name);
@@ -366,17 +529,218 @@ fn storeSnapshot(snapshot_index: usize) void {
     _ = c.EnumWindows(captureSnapshotWindow, @bitCast(@intFromPtr(&capture)));
 
     const snapshot = &snapshots[snapshot_index];
+    if (snapshot.layout_persisted) associateExistingSnapshotWindows(snapshot);
+    if (snapshot.stored and snapshot.auto_start and snapshot.layout_persisted) {
+        const update_mismatch = if (snapshotWindowIdsPersisted(snapshot))
+            !hasSameSnapshotWindows(snapshot, capture.entries[0..capture.entry_count])
+        else
+            capture.entry_count != snapshot.application_count;
+        if (update_mismatch) {
+            c.ZnapShowSnapshotUpdateRejected(message_window, tray_id, @intCast(snapshot_index), @intCast(snapshot.count), @intCast(capture.entry_count));
+            return;
+        }
+    }
+    const preserve_launch_information = snapshot.stored and snapshot.auto_start and snapshot.layout_persisted;
+    if (preserve_launch_information) alignSnapshotApplications(snapshot, capture.entries[0..capture.entry_count]);
     snapshot.count = capture.entry_count;
     @memcpy(snapshot.entries[0..capture.entry_count], capture.entries[0..capture.entry_count]);
+    if (preserve_launch_information) {
+        for (snapshot.entries[0..snapshot.count], 0..) |*entry, index| entry.application_index = @intCast(index);
+        migrateSnapshotWindowIds(snapshot);
+    } else captureSnapshotApplications(snapshot);
     snapshot.focused = null;
+    snapshot.focused_application = null;
     for (snapshot.entries[0..snapshot.count]) |entry| {
         if (entry.hwnd == focused) {
             snapshot.focused = focused;
+            snapshot.focused_application = entry.application_index;
             break;
         }
     }
     snapshot.stored = true;
+    snapshot.layout_persisted = true;
+    if (snapshot.auto_start) saveSettings() catch |err| {
+        std.log.err("failed to save snapshot application information: {s}", .{@errorName(err)});
+    };
     animateStoredSnapshot(snapshot);
+    refreshSnapshotSettingsPanel();
+}
+
+fn alignSnapshotApplications(snapshot: *WindowSnapshot, captured: []const SnapshotEntry) void {
+    var application_windows: [snapshot_capacity]c.HWND = [_]c.HWND{null} ** snapshot_capacity;
+    for (snapshot.entries[0..snapshot.count]) |entry| application_windows[entry.application_index] = entry.hwnd;
+    for (captured, 0..) |captured_entry, target_index| {
+        var source_index = target_index;
+        while (source_index < snapshot.application_count and application_windows[source_index] != captured_entry.hwnd) : (source_index += 1) {}
+        if (source_index == snapshot.application_count or source_index == target_index) continue;
+        std.mem.swap(SnapshotApplication, &snapshot.applications[target_index], &snapshot.applications[source_index]);
+        std.mem.swap(c.HWND, &application_windows[target_index], &application_windows[source_index]);
+    }
+}
+
+fn hasSameSnapshotWindows(snapshot: *const WindowSnapshot, captured: []const SnapshotEntry) bool {
+    if (snapshot.count != captured.len) return false;
+    for (snapshot.entries[0..snapshot.count]) |saved| {
+        var found = false;
+        for (captured) |candidate| {
+            if (candidate.hwnd == saved.hwnd) {
+                found = true;
+                break;
+            }
+        }
+        if (!found) return false;
+    }
+    return true;
+}
+
+fn snapshotWindowIdsPersisted(snapshot: *const WindowSnapshot) bool {
+    for (snapshot.applications[0..snapshot.application_count]) |application| {
+        if (!application.window_id_persisted) return false;
+    }
+    return true;
+}
+
+fn migrateSnapshotWindowIds(snapshot: *WindowSnapshot) void {
+    for (snapshot.entries[0..snapshot.count]) |entry| {
+        const application = &snapshot.applications[entry.application_index];
+        if (application.window_id_persisted) {
+            rememberRuntimeWindow(application.window_id, entry.hwnd);
+            continue;
+        }
+        application.window_id = runtimeWindowIdForHwnd(entry.hwnd) orelse allocateWindowId();
+        application.window_id_persisted = true;
+        rememberRuntimeWindow(application.window_id, entry.hwnd);
+    }
+}
+
+fn captureSnapshotApplications(snapshot: *WindowSnapshot) void {
+    snapshot.application_count = snapshot.count;
+    for (snapshot.entries[0..snapshot.count], 0..) |*entry, index| {
+        const window_id = runtimeWindowIdForHwnd(entry.hwnd) orelse allocateWindowId();
+        snapshot.applications[index] = .{ .window_id = window_id, .window_id_persisted = true };
+        var executable: [4096]u16 = [_]u16{0} ** 4096;
+        var app_user_model_id: [512]u16 = [_]u16{0} ** 512;
+        if (c.ZnapGetWindowApplicationInfo(entry.hwnd, &executable, executable.len, &app_user_model_id, app_user_model_id.len) != 0) {
+            _ = snapshot.applications[index].executable.setUtf16(@ptrCast(&executable));
+            _ = snapshot.applications[index].app_user_model_id.setUtf16(@ptrCast(&app_user_model_id));
+        }
+        entry.application_index = @intCast(index);
+        rememberRuntimeWindow(window_id, entry.hwnd);
+    }
+}
+
+fn applicationWindowIsUsable(application: *const SnapshotApplication, hwnd: c.HWND) bool {
+    if (!isZonableWindow(hwnd)) return false;
+    var executable: [4096]u16 = [_]u16{0} ** 4096;
+    var app_user_model_id: [4096]u16 = [_]u16{0} ** 4096;
+    if (!application.executable.toUtf16(&executable) or !application.app_user_model_id.toUtf16(&app_user_model_id)) return false;
+    return c.ZnapWindowMatchesApplication(hwnd, &executable, &app_user_model_id) != 0;
+}
+
+fn snapshotEntryWindowIsUsable(snapshot: *const WindowSnapshot, entry: *const SnapshotEntry) bool {
+    const application_index: usize = entry.application_index;
+    return application_index < snapshot.application_count and
+        applicationWindowIsUsable(&snapshot.applications[application_index], entry.hwnd);
+}
+
+fn appendClaimedWindow(claimed: []c.HWND, claimed_count: *usize, hwnd: c.HWND) void {
+    if (hwnd == null) return;
+    for (claimed[0..claimed_count.*]) |existing| {
+        if (existing == hwnd) return;
+    }
+    if (claimed_count.* == claimed.len) return;
+    claimed[claimed_count.*] = hwnd;
+    claimed_count.* += 1;
+}
+
+fn windowIdMatchesRuntimeWindow(window_id: u64, hwnd: c.HWND) bool {
+    for (&snapshots) |*snapshot| {
+        for (snapshot.applications[0..snapshot.application_count]) |*application| {
+            if (application.window_id == window_id and applicationWindowIsUsable(application, hwnd)) return true;
+        }
+    }
+    return false;
+}
+
+fn runtimeWindowIdForHwnd(hwnd: c.HWND) ?u64 {
+    for (runtime_windows[0..runtime_window_count]) |*runtime| {
+        if (runtime.hwnd != hwnd or hwnd == null) continue;
+        if (windowIdMatchesRuntimeWindow(runtime.window_id, hwnd)) return runtime.window_id;
+        runtime.hwnd = null;
+    }
+    return null;
+}
+
+fn rememberRuntimeWindow(window_id: u64, hwnd: c.HWND) void {
+    if (window_id == 0 or hwnd == null) return;
+    var target_index: ?usize = null;
+    for (runtime_windows[0..runtime_window_count], 0..) |*runtime, index| {
+        if (runtime.window_id == window_id) target_index = index;
+        if (runtime.hwnd == hwnd and runtime.window_id != window_id) runtime.hwnd = null;
+    }
+    if (target_index) |index| {
+        runtime_windows[index].hwnd = hwnd;
+    } else if (runtime_window_count < runtime_windows.len) {
+        runtime_windows[runtime_window_count] = .{ .window_id = window_id, .hwnd = hwnd };
+        runtime_window_count += 1;
+    }
+}
+
+fn runtimeWindowForApplication(application: *const SnapshotApplication) c.HWND {
+    for (runtime_windows[0..runtime_window_count]) |*runtime| {
+        if (runtime.window_id != application.window_id) continue;
+        if (applicationWindowIsUsable(application, runtime.hwnd)) return runtime.hwnd;
+        runtime.hwnd = null;
+        return null;
+    }
+    return null;
+}
+
+fn runtimeHwndForWindowId(window_id: u64) c.HWND {
+    for (runtime_windows[0..runtime_window_count]) |*runtime| {
+        if (runtime.window_id != window_id) continue;
+        if (isZonableWindow(runtime.hwnd)) return runtime.hwnd;
+        runtime.hwnd = null;
+        return null;
+    }
+    return null;
+}
+
+fn excludeOtherRuntimeWindows(window_id: u64, excluded: []c.HWND, excluded_count: *usize) void {
+    for (runtime_windows[0..runtime_window_count]) |*runtime| {
+        if (runtime.window_id == window_id or runtime.hwnd == null) continue;
+        if (!windowIdMatchesRuntimeWindow(runtime.window_id, runtime.hwnd)) {
+            runtime.hwnd = null;
+            continue;
+        }
+        appendClaimedWindow(excluded, excluded_count, runtime.hwnd);
+    }
+}
+
+fn bindApplicationWindow(snapshot: *WindowSnapshot, application_index: usize, hwnd: c.HWND) void {
+    const application = &snapshot.applications[application_index];
+    rememberRuntimeWindow(application.window_id, hwnd);
+    assignApplicationWindow(snapshot, application_index, hwnd);
+}
+
+fn seedRuntimeWindowsFromSnapshots() void {
+    for (&snapshots) |*stored_snapshot| {
+        if (!stored_snapshot.stored) continue;
+        for (stored_snapshot.entries[0..stored_snapshot.count]) |entry| {
+            if (!snapshotEntryWindowIsUsable(stored_snapshot, &entry)) continue;
+            rememberRuntimeWindow(stored_snapshot.applications[entry.application_index].window_id, entry.hwnd);
+        }
+    }
+}
+
+fn associateExistingSnapshotWindows(snapshot: *WindowSnapshot) void {
+    seedRuntimeWindowsFromSnapshots();
+
+    for (snapshot.applications[0..snapshot.application_count], 0..) |*application, application_index| {
+        if (runtimeWindowForApplication(application)) |hwnd| {
+            assignApplicationWindow(snapshot, application_index, hwnd);
+        }
+    }
 }
 
 fn animateStoredSnapshot(snapshot: *const WindowSnapshot) void {
@@ -439,8 +803,22 @@ fn captureSnapshotWindow(hwnd: c.HWND, lparam: c.LPARAM) callconv(.c) c.BOOL {
 fn recallSnapshot(snapshot_index: usize) void {
     const snapshot = &snapshots[snapshot_index];
     if (!snapshot.stored) return;
+    const started_windows = snapshot.auto_start and startMissingSnapshotApplications(snapshot_index, snapshot);
     const previous_focus = c.GetForegroundWindow();
 
+    if (started_windows) c.Sleep(350);
+    applySnapshotPlacements(snapshot);
+    if (started_windows) {
+        // Some applications apply their own startup geometry shortly after
+        // showing the window. Reapply once after that initialization pass.
+        c.Sleep(250);
+        applySnapshotPlacements(snapshot);
+    }
+
+    restoreSnapshotOrderAndFocus(snapshot, previous_focus);
+}
+
+fn applySnapshotPlacements(snapshot: *WindowSnapshot) void {
     for (snapshot.entries[0..snapshot.count]) |entry| {
         if (c.IsWindow(entry.hwnd) == 0 or !isZonableWindow(entry.hwnd)) continue;
         var placement = entry.placement;
@@ -448,7 +826,9 @@ fn recallSnapshot(snapshot_index: usize) void {
         _ = c.SetWindowPlacement(entry.hwnd, &placement);
         maximize_states.remove(@intFromPtr(entry.hwnd.?));
     }
+}
 
+fn restoreSnapshotOrderAndFocus(snapshot: *WindowSnapshot, previous_focus: c.HWND) void {
     // Entries were captured from front to back. Raise them in reverse so the
     // whole snapshot ends above other normal windows in its captured order.
     // Toggling through the topmost band forces Windows to promote windows owned
@@ -479,6 +859,114 @@ fn recallSnapshot(snapshot_index: usize) void {
     if (final_focus != null and c.IsWindow(final_focus) != 0 and isZonableWindow(final_focus)) {
         if (c.IsIconic(final_focus) != 0) _ = c.ShowWindow(final_focus, c.SW_RESTORE);
         activateForTaskSwitch(final_focus);
+    }
+}
+
+fn startMissingSnapshotApplications(snapshot_index: usize, snapshot: *WindowSnapshot) bool {
+    var pending = [_]bool{false} ** snapshot_capacity;
+    var failed = [_]bool{false} ** snapshot_capacity;
+    var pending_count: usize = 0;
+    var runtime_mapping_changed = false;
+    seedRuntimeWindowsFromSnapshots();
+    for (snapshot.applications[0..snapshot.application_count], 0..) |*application, application_index| {
+        if (runtimeWindowForApplication(application)) |hwnd| {
+            assignApplicationWindow(snapshot, application_index, hwnd);
+            continue;
+        }
+
+        var executable: [4096]u16 = [_]u16{0} ** 4096;
+        var arguments: [4096]u16 = [_]u16{0} ** 4096;
+        var working_directory: [4096]u16 = [_]u16{0} ** 4096;
+        var app_user_model_id: [4096]u16 = [_]u16{0} ** 4096;
+        if (!application.executable.toUtf16(&executable) or
+            !application.arguments.toUtf16(&arguments) or
+            !application.working_directory.toUtf16(&working_directory) or
+            !application.app_user_model_id.toUtf16(&app_user_model_id)) {
+            failed[application_index] = true;
+            continue;
+        }
+
+        if (c.ZnapStartApplication(&executable, &arguments, &working_directory, &app_user_model_id, if (isWindowsTerminal(application)) c.TRUE else c.FALSE) != 0) {
+            pending[application_index] = true;
+            pending_count += 1;
+        } else {
+            failed[application_index] = true;
+        }
+    }
+
+    var matched_started_window = false;
+    var attempt: u7 = 0;
+    while (pending_count > 0 and attempt < 100) : (attempt += 1) {
+        if (attempt != 0) c.Sleep(50);
+        for (snapshot.applications[0..snapshot.application_count], 0..) |*application, application_index| {
+            if (!pending[application_index]) continue;
+            var executable: [4096]u16 = [_]u16{0} ** 4096;
+            var app_user_model_id: [4096]u16 = [_]u16{0} ** 4096;
+            if (!application.executable.toUtf16(&executable) or !application.app_user_model_id.toUtf16(&app_user_model_id)) {
+                pending[application_index] = false;
+                pending_count -= 1;
+                failed[application_index] = true;
+                continue;
+            }
+            var excluded: [snapshot_window_capacity]c.HWND = [_]c.HWND{null} ** snapshot_window_capacity;
+            var excluded_count: usize = 0;
+            excludeOtherRuntimeWindows(application.window_id, &excluded, &excluded_count);
+            const hwnd = c.ZnapFindApplicationWindow(&executable, &app_user_model_id, &excluded, @intCast(excluded_count));
+            if (hwnd == null) continue;
+            bindApplicationWindow(snapshot, application_index, hwnd);
+            runtime_mapping_changed = true;
+            pending[application_index] = false;
+            pending_count -= 1;
+            matched_started_window = true;
+        }
+    }
+
+    var failed_count: usize = 0;
+    var first_failed: usize = 0;
+    for (failed, pending, 0..) |launch_failed, window_pending, application_index| {
+        if (!launch_failed and !window_pending) continue;
+        if (failed_count == 0) first_failed = application_index;
+        failed_count += 1;
+    }
+    if (failed_count != 0) {
+        c.ZnapShowSnapshotRecallFailed(
+            message_window,
+            tray_id,
+            @intCast(snapshot_index),
+            @intCast(first_failed),
+            @intCast(failed_count),
+        );
+    }
+    if (runtime_mapping_changed) saveSettings() catch |err| {
+        std.log.err("failed to save snapshot window mappings: {s}", .{@errorName(err)});
+    };
+    return matched_started_window;
+}
+
+fn isWindowsTerminal(application: *const SnapshotApplication) bool {
+    const executable_name = std.fs.path.basename(application.executable.slice());
+    return std.ascii.eqlIgnoreCase(executable_name, "WindowsTerminal.exe") or
+        std.ascii.eqlIgnoreCase(executable_name, "wt.exe") or
+        asciiContainsIgnoreCase(application.app_user_model_id.slice(), "WindowsTerminal");
+}
+
+fn asciiContainsIgnoreCase(haystack: []const u8, needle: []const u8) bool {
+    if (needle.len == 0) return true;
+    if (needle.len > haystack.len) return false;
+    for (0..haystack.len - needle.len + 1) |start| {
+        if (std.ascii.eqlIgnoreCase(haystack[start .. start + needle.len], needle)) return true;
+    }
+    return false;
+}
+
+fn assignApplicationWindow(snapshot: *WindowSnapshot, application_index: usize, hwnd: c.HWND) void {
+    for (snapshot.entries[0..snapshot.count]) |*entry| {
+        if (entry.application_index != application_index) continue;
+        entry.hwnd = hwnd;
+        if (snapshot.focused_application) |focused_index| {
+            if (@as(usize, focused_index) == application_index) snapshot.focused = hwnd;
+        }
+        return;
     }
 }
 
@@ -1094,6 +1582,16 @@ fn showSettingsDialog(owner: c.HWND) void {
         rows[row_count] = makeSettingsRow(index, hotkey);
         row_count += 1;
     }
+
+    var snapshot_application_counts: [10]c.UINT = [_]c.UINT{0} ** 10;
+    var stored_snapshot_mask: c.UINT = 0;
+    var auto_start_snapshot_mask: c.UINT = 0;
+    for (&snapshots, 0..) |*snapshot, index| {
+        if (snapshot.stored) associateExistingSnapshotWindows(snapshot);
+        snapshot_application_counts[index] = @intCast(snapshot.application_count);
+        if (snapshot.stored) stored_snapshot_mask |= @as(c.UINT, 1) << @intCast(index);
+        if (snapshot.auto_start) auto_start_snapshot_mask |= @as(c.UINT, 1) << @intCast(index);
+    }
     const general_count = row_count;
     for (hotkeys, 0..) |hotkey, index| {
         if (!isSnapshotAction(hotkey.action)) continue;
@@ -1118,7 +1616,22 @@ fn showSettingsDialog(owner: c.HWND) void {
         @intFromEnum(default_corner_cycle_width),
         @intFromEnum(default_center_cycle_width),
         if (smart_fill) c.TRUE else c.FALSE,
+        &snapshot_application_counts,
+        stored_snapshot_mask,
+        auto_start_snapshot_mask,
     );
+}
+
+fn refreshSnapshotSettingsPanel() void {
+    var snapshot_application_counts: [snapshot_count]c.UINT = [_]c.UINT{0} ** snapshot_count;
+    var stored_snapshot_mask: c.UINT = 0;
+    var auto_start_snapshot_mask: c.UINT = 0;
+    for (&snapshots, 0..) |*snapshot, index| {
+        snapshot_application_counts[index] = @intCast(snapshot.application_count);
+        if (snapshot.stored) stored_snapshot_mask |= @as(c.UINT, 1) << @intCast(index);
+        if (snapshot.auto_start) auto_start_snapshot_mask |= @as(c.UINT, 1) << @intCast(index);
+    }
+    c.ZnapRefreshSnapshotSettings(&snapshot_application_counts, stored_snapshot_mask, auto_start_snapshot_mask);
 }
 
 fn makeSettingsRow(index: usize, hotkey: settings.LoadedKeymap) c.ZnapKeymapRow {
@@ -1149,6 +1662,34 @@ pub export fn ZnapUpdateKeymap(index: c.UINT, modifiers: c.UINT, key: c.UINT) c.
 }
 
 fn saveSettings() !void {
+    var saved_snapshots: [10]settings.Snapshot = undefined;
+    var saved_applications: [10][snapshot_capacity]settings.SnapshotApplication = undefined;
+    var saved_count: usize = 0;
+    for (&snapshots, 0..) |*snapshot, snapshot_index| {
+        if (!snapshot.stored or !snapshot.auto_start) continue;
+        for (snapshot.applications[0..snapshot.application_count], 0..) |*application, application_index| {
+            const runtime_hwnd = runtimeHwndForWindowId(application.window_id);
+            saved_applications[saved_count][application_index] = .{
+                .window_id = if (application.window_id_persisted) application.window_id else 0,
+                .last_hwnd = if (runtime_hwnd) |hwnd| @intFromPtr(hwnd) else 0,
+                .executable = application.executable.slice(),
+                .arguments = application.arguments.slice(),
+                .working_directory = application.working_directory.slice(),
+                .app_user_model_id = application.app_user_model_id.slice(),
+                .placement = if (snapshot.layout_persisted)
+                    if (snapshotEntryForApplication(snapshot, application_index)) |entry| placementToSettings(entry.placement) else null
+                else
+                    null,
+            };
+        }
+        saved_snapshots[saved_count] = .{
+            .index = @intCast(snapshot_index),
+            .auto_start = true,
+            .applications = saved_applications[saved_count][0..snapshot.application_count],
+            .focused_application = snapshot.focused_application,
+        };
+        saved_count += 1;
+    }
     try settings.save(
         app_io,
         app_allocator,
@@ -1161,7 +1702,102 @@ fn saveSettings() !void {
         default_corner_cycle_width,
         default_center_cycle_width,
         smart_fill,
+        saved_snapshots[0..saved_count],
     );
+}
+
+fn snapshotEntryForApplication(snapshot: *const WindowSnapshot, application_index: usize) ?*const SnapshotEntry {
+    for (snapshot.entries[0..snapshot.count]) |*entry| {
+        if (entry.application_index == application_index) return entry;
+    }
+    return null;
+}
+
+fn applicationField(application: *SnapshotApplication, field: usize) ?*SnapshotText {
+    return switch (field) {
+        0 => &application.executable,
+        1 => &application.arguments,
+        2 => &application.working_directory,
+        3 => &application.app_user_model_id,
+        else => null,
+    };
+}
+
+fn snapshotApplicationField(snapshot_index: usize, application_index: usize, field: usize) ?*SnapshotText {
+    if (snapshot_index >= snapshots.len) return null;
+    const snapshot = &snapshots[snapshot_index];
+    if (!snapshot.stored or application_index >= snapshot.application_count) return null;
+    return applicationField(&snapshot.applications[application_index], field);
+}
+
+pub export fn ZnapGetSnapshotApplicationText(snapshot_index: c.UINT, application_index: c.UINT, field: c.UINT, buffer: [*c]u16, capacity: c.UINT) c.BOOL {
+    if (buffer == null or capacity == 0) return c.FALSE;
+    const text = snapshotApplicationField(snapshot_index, application_index, field) orelse {
+        buffer[0] = 0;
+        return c.FALSE;
+    };
+    return if (text.toUtf16(buffer[0..capacity])) c.TRUE else c.FALSE;
+}
+
+pub export fn ZnapGetSnapshotApplicationHwnd(snapshot_index: c.UINT, application_index: c.UINT) c.UINT_PTR {
+    if (snapshot_index >= snapshots.len) return 0;
+    const snapshot = &snapshots[snapshot_index];
+    if (!snapshot.stored or application_index >= snapshot.application_count) return 0;
+    const hwnd = runtimeWindowForApplication(&snapshot.applications[application_index]);
+    return if (hwnd) |value| @intFromPtr(value) else 0;
+}
+
+pub export fn ZnapGetSnapshotApplicationWindowId(snapshot_index: c.UINT, application_index: c.UINT) c.ULONGLONG {
+    if (snapshot_index >= snapshots.len) return 0;
+    const snapshot = &snapshots[snapshot_index];
+    if (!snapshot.stored or application_index >= snapshot.application_count) return 0;
+    return snapshot.applications[application_index].window_id;
+}
+
+pub export fn ZnapUpdateSnapshotAutoStart(snapshot_index: c.UINT, enabled: c.BOOL) c.BOOL {
+    if (snapshot_index >= snapshots.len or !snapshots[snapshot_index].stored) return c.FALSE;
+    const previous = snapshots[snapshot_index].auto_start;
+    snapshots[snapshot_index].auto_start = enabled != 0;
+    saveSettings() catch |err| {
+        snapshots[snapshot_index].auto_start = previous;
+        std.log.err("failed to save snapshot auto-start setting: {s}", .{@errorName(err)});
+        return c.FALSE;
+    };
+    return c.TRUE;
+}
+
+pub export fn ZnapUpdateSnapshotApplication(snapshot_index: c.UINT, application_index: c.UINT, field: c.UINT, value: [*c]const u16) c.BOOL {
+    if (value == null or snapshot_index >= snapshots.len or !snapshots[snapshot_index].auto_start) return c.FALSE;
+    const source_snapshot = &snapshots[snapshot_index];
+    if (application_index >= source_snapshot.application_count) return c.FALSE;
+    const window_id = source_snapshot.applications[application_index].window_id;
+    if (window_id == 0) return c.FALSE;
+
+    var targets: [snapshot_count]*SnapshotText = undefined;
+    var previous: [snapshot_count]SnapshotText = undefined;
+    var target_count: usize = 0;
+    for (&snapshots) |*snapshot| {
+        if (!snapshot.stored) continue;
+        for (snapshot.applications[0..snapshot.application_count]) |*application| {
+            if (application.window_id != window_id) continue;
+            targets[target_count] = applicationField(application, field) orelse return c.FALSE;
+            previous[target_count] = targets[target_count].*;
+            target_count += 1;
+            break;
+        }
+    }
+    if (target_count == 0) return c.FALSE;
+    for (targets[0..target_count], 0..) |text, index| {
+        if (text.setUtf16(@ptrCast(value))) continue;
+        for (targets[0..index], previous[0..index]) |changed, old| changed.* = old;
+        return c.FALSE;
+    }
+    saveSettings() catch |err| {
+        for (targets[0..target_count], previous[0..target_count]) |changed, old| changed.* = old;
+        std.log.err("failed to save snapshot application setting: {s}", .{@errorName(err)});
+        return c.FALSE;
+    };
+    return c.TRUE;
 }
 
 fn firstEnabledCycleWidth(mask: u8) settings.CycleWidth {

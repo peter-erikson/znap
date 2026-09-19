@@ -59,6 +59,16 @@ Assigning a shortcut already used by another Znap action clears the duplicate. A
 
 ![Znap Keybind settings](assets/settings_keybinds.png)
 
+### Snapshots
+
+Captured snapshots list one application record for every captured top-level window, including multiple windows owned by the same process. Enable **Auto Start Applications** to persist the captured window layout, executable, and App User Model ID, edit optional launch arguments or working directories, and start missing applications when that snapshot is recalled. Application fields are read-only until auto start is enabled. Missing Windows Terminal records are launched as separate Terminal windows. If an application cannot be launched or does not create a matching window, Znap reports the failed snapshot and application through a Windows notification.
+
+Each captured window also receives a persistent logical window ID. When the same window is included in multiple snapshots, those records share the ID and resolve to the same runtime HWND. Distinct windows from the same application retain different IDs, including Windows Terminal windows.
+
+Editing an application's executable, arguments, working directory, or App User Model ID updates every snapshot record that references the same logical window.
+
+When Auto Start Applications is enabled, a snapshot can only be updated while exactly the same captured windows are present. An update with a different window set is rejected and reported through a Windows notification; disable auto start first when intentionally replacing the snapshot with different windows.
+
 The settings window follows the Windows light, dark, and high-contrast themes and supports display scaling.
 
 ## Build from source

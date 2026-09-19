@@ -10,11 +10,140 @@
 #include <oleauto.h>
 #include <commctrl.h>
 #include <uxtheme.h>
+#include <appmodel.h>
+#include <wchar.h>
 
 #define ZNAP_TASK_NAME L"Znap"
 #define ZNAP_TASK_DESCRIPTION L"Starts Znap when the current user signs in."
 #define ZNAP_LEGACY_STARTUP_KEY L"SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Run"
 #define ZNAP_LEGACY_STARTUP_VALUE L"Znap"
+
+BOOL ZnapGetWindowApplicationInfo(HWND hwnd, WCHAR *executable, UINT executable_capacity, WCHAR *app_user_model_id, UINT app_user_model_id_capacity) {
+    if (executable == NULL || executable_capacity == 0 || app_user_model_id == NULL || app_user_model_id_capacity == 0) return FALSE;
+    executable[0] = L'\0';
+    app_user_model_id[0] = L'\0';
+    DWORD process_id = 0;
+    if (GetWindowThreadProcessId(hwnd, &process_id) == 0 || process_id == 0) return FALSE;
+    HANDLE process = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, process_id);
+    if (process == NULL) return FALSE;
+
+    DWORD executable_length = executable_capacity;
+    const BOOL got_executable = QueryFullProcessImageNameW(process, 0, executable, &executable_length);
+    UINT32 app_id_length = app_user_model_id_capacity;
+    if (GetApplicationUserModelId(process, &app_id_length, app_user_model_id) != ERROR_SUCCESS) {
+        app_user_model_id[0] = L'\0';
+    }
+    CloseHandle(process);
+    return got_executable || app_user_model_id[0] != L'\0';
+}
+
+BOOL ZnapWindowMatchesApplication(HWND hwnd, const WCHAR *executable, const WCHAR *app_user_model_id) {
+    WCHAR actual_executable[4096] = {0};
+    WCHAR actual_app_user_model_id[512] = {0};
+    if (!ZnapGetWindowApplicationInfo(hwnd, actual_executable, ARRAYSIZE(actual_executable), actual_app_user_model_id, ARRAYSIZE(actual_app_user_model_id))) return FALSE;
+    if (app_user_model_id != NULL && app_user_model_id[0] != L'\0') {
+        return CompareStringOrdinal(actual_app_user_model_id, -1, app_user_model_id, -1, TRUE) == CSTR_EQUAL;
+    }
+    return executable != NULL && executable[0] != L'\0' &&
+        CompareStringOrdinal(actual_executable, -1, executable, -1, TRUE) == CSTR_EQUAL;
+}
+
+typedef struct ZnapFindApplicationContext {
+    const WCHAR *executable;
+    const WCHAR *app_user_model_id;
+    const HWND *excluded;
+    UINT excluded_count;
+    HWND result;
+} ZnapFindApplicationContext;
+
+static BOOL CALLBACK ZnapFindApplicationCallback(HWND hwnd, LPARAM lparam) {
+    ZnapFindApplicationContext *context = (ZnapFindApplicationContext *)lparam;
+    if (!IsWindowVisible(hwnd) || GetAncestor(hwnd, GA_ROOT) != hwnd) return TRUE;
+    for (UINT index = 0; index < context->excluded_count; index++) {
+        if (context->excluded[index] == hwnd) return TRUE;
+    }
+    if (!ZnapWindowMatchesApplication(hwnd, context->executable, context->app_user_model_id)) return TRUE;
+    context->result = hwnd;
+    return FALSE;
+}
+
+HWND ZnapFindApplicationWindow(const WCHAR *executable, const WCHAR *app_user_model_id, const HWND *excluded, UINT excluded_count) {
+    ZnapFindApplicationContext context = { executable, app_user_model_id, excluded, excluded_count, NULL };
+    EnumWindows(ZnapFindApplicationCallback, (LPARAM)&context);
+    return context.result;
+}
+
+BOOL ZnapStartApplication(const WCHAR *executable, const WCHAR *arguments, const WCHAR *working_directory, const WCHAR *app_user_model_id, BOOL separate_terminal_window) {
+    WCHAR terminal_parameters[32768];
+    const WCHAR *parameters = arguments != NULL && arguments[0] != L'\0' ? arguments : NULL;
+    if (separate_terminal_window) {
+        const WCHAR prefix[] = L"--window new";
+        const size_t prefix_length = ARRAYSIZE(prefix) - 1;
+        const size_t argument_length = parameters != NULL ? wcslen(parameters) : 0;
+        if (prefix_length + (argument_length == 0 ? 0 : 1 + argument_length) >= ARRAYSIZE(terminal_parameters)) return FALSE;
+        CopyMemory(terminal_parameters, prefix, prefix_length * sizeof(WCHAR));
+        size_t length = prefix_length;
+        if (argument_length != 0) {
+            terminal_parameters[length++] = L' ';
+            CopyMemory(terminal_parameters + length, parameters, argument_length * sizeof(WCHAR));
+            length += argument_length;
+        }
+        terminal_parameters[length] = L'\0';
+        parameters = terminal_parameters;
+    }
+    const WCHAR *directory = working_directory != NULL && working_directory[0] != L'\0' ? working_directory : NULL;
+    HINSTANCE result;
+    if (separate_terminal_window && executable != NULL && executable[0] != L'\0') {
+        result = ShellExecuteW(NULL, L"open", executable, parameters, directory, SW_SHOWNORMAL);
+    } else if (app_user_model_id != NULL && app_user_model_id[0] != L'\0') {
+        WCHAR target[32768];
+        const WCHAR prefix[] = L"shell:AppsFolder\\";
+        const size_t prefix_length = ARRAYSIZE(prefix) - 1;
+        const size_t app_id_length = wcslen(app_user_model_id);
+        if (prefix_length + app_id_length >= ARRAYSIZE(target)) return FALSE;
+        CopyMemory(target, prefix, prefix_length * sizeof(WCHAR));
+        CopyMemory(target + prefix_length, app_user_model_id, (app_id_length + 1) * sizeof(WCHAR));
+        result = ShellExecuteW(NULL, L"open", target, parameters, directory, SW_SHOWNORMAL);
+    } else {
+        if (executable == NULL || executable[0] == L'\0') return FALSE;
+        result = ShellExecuteW(NULL, L"open", executable, parameters, directory, SW_SHOWNORMAL);
+    }
+    return (INT_PTR)result > 32;
+}
+
+void ZnapShowSnapshotUpdateRejected(HWND owner, UINT icon_id, UINT snapshot_index, UINT expected_windows, UINT captured_windows) {
+    NOTIFYICONDATAW notification = {0};
+    notification.cbSize = sizeof(notification);
+    notification.hWnd = owner;
+    notification.uID = icon_id;
+    notification.uFlags = NIF_INFO;
+    notification.dwInfoFlags = NIIF_WARNING;
+    lstrcpynW(notification.szInfoTitle, L"Snapshot not updated", ARRAYSIZE(notification.szInfoTitle));
+    wsprintfW(notification.szInfo,
+        L"Snapshot %u has Auto Start Applications enabled. It contains %u windows, but the update captured %u. Restore the same windows or disable Auto Start Applications first.",
+        snapshot_index + 1, expected_windows, captured_windows);
+    Shell_NotifyIconW(NIM_MODIFY, &notification);
+}
+
+void ZnapShowSnapshotRecallFailed(HWND owner, UINT icon_id, UINT snapshot_index, UINT application_index, UINT failed_applications) {
+    NOTIFYICONDATAW notification = {0};
+    notification.cbSize = sizeof(notification);
+    notification.hWnd = owner;
+    notification.uID = icon_id;
+    notification.uFlags = NIF_INFO;
+    notification.dwInfoFlags = NIIF_WARNING;
+    lstrcpynW(notification.szInfoTitle, L"Snapshot recall incomplete", ARRAYSIZE(notification.szInfoTitle));
+    if (failed_applications == 1) {
+        wsprintfW(notification.szInfo,
+            L"Snapshot %u could not start Application %u. Check its launch information in Snapshot settings.",
+            snapshot_index + 1, application_index + 1);
+    } else {
+        wsprintfW(notification.szInfo,
+            L"Snapshot %u could not start %u applications. The first failure was Application %u. Check their launch information in Snapshot settings.",
+            snapshot_index + 1, failed_applications, application_index + 1);
+    }
+    Shell_NotifyIconW(NIM_MODIFY, &notification);
+}
 
 typedef struct ZnapTaskScheduler {
     BOOL uninitialize_com;
@@ -366,9 +495,12 @@ void ZnapShowSnapWarning(HINSTANCE instance) {
 #define ZNAP_CYCLE_WIDTH_BASE 3100
 #define ZNAP_CYCLE_DEFAULT_BASE 3120
 #define ZNAP_SMART_FILL 3130
+#define ZNAP_SNAPSHOT_AUTOSTART_BASE 3200
 #define ZNAP_CYCLE_GROUP_COUNT 3
 #define ZNAP_CYCLE_WIDTH_COUNT 5
 #define ZNAP_KEYMAP_CONTROL_BASE 4000
+#define ZNAP_SNAPSHOT_FIELD_BASE 5000
+#define ZNAP_SNAPSHOT_FIELD_COUNT 4
 #define ZNAP_ACTION_STORE_SNAPSHOT 10
 #define ZNAP_MAX_KEYMAPS 256
 #define ZNAP_CAPTURE_KEYMAP (WM_APP + 20)
@@ -391,7 +523,8 @@ void ZnapShowSnapWarning(HINSTANCE instance) {
 #define ZNAP_TOOLTIP_HEIGHT 58
 #define ZNAP_CHECKBOX_SIZE 20
 #define ZNAP_CHECKBOX_HEIGHT 30
-#define ZNAP_MAX_SECTION_HEADERS 8
+#define ZNAP_MAX_SECTION_HEADERS 32
+#define ZNAP_SNAPSHOT_TEXT_CAPACITY 4096
 
 typedef struct ZnapSettingsRowState {
     HWND edit;
@@ -405,6 +538,7 @@ static HWND znap_settings_window = NULL;
 static HWND znap_settings_navigation = NULL;
 static HWND znap_general_page = NULL;
 static HWND znap_keybinds_page = NULL;
+static HWND znap_snapshots_page = NULL;
 static HWND znap_startup_normal = NULL;
 static HWND znap_startup_admin = NULL;
 static HWND znap_startup_info = NULL;
@@ -415,6 +549,10 @@ static UINT znap_cycle_defaults[ZNAP_CYCLE_GROUP_COUNT] = {2, 2, 2};
 static const WCHAR *znap_cycle_labels[ZNAP_CYCLE_WIDTH_COUNT] = { L"1/4", L"1/3", L"1/2", L"2/3", L"3/4" };
 static int znap_general_content_height = 0;
 static int znap_keybinds_content_height = 0;
+static int znap_snapshots_content_height = 0;
+static HWND znap_snapshot_autostart[ZNAP_SNAPSHOT_COUNT] = {NULL};
+static HWND znap_snapshot_fields[ZNAP_SNAPSHOT_COUNT][ZNAP_SNAPSHOT_APPLICATION_CAPACITY][ZNAP_SNAPSHOT_FIELD_COUNT] = {{{NULL}}};
+static BOOL znap_updating_snapshot_fields = FALSE;
 static ZnapSettingsRowState znap_settings_rows[ZNAP_MAX_KEYMAPS];
 static UINT znap_settings_row_count = 0;
 static LONG znap_recording_row = -1;
@@ -956,6 +1094,7 @@ static LRESULT CALLBACK ZnapCollisionTooltipProc(HWND tooltip, UINT message, WPA
 static int ZnapPageContentHeight(HWND page) {
     if (page == znap_general_page) return ZnapScale(znap_general_content_height);
     if (page == znap_keybinds_page) return ZnapScale(znap_keybinds_content_height);
+    if (page == znap_snapshots_page) return ZnapScale(znap_snapshots_content_height);
     return 0;
 }
 
@@ -988,8 +1127,10 @@ static void ZnapScrollSettingsPage(HWND page, int requested_position) {
 
 static void ZnapShowSettingsPage(int index) {
     const BOOL show_general = index == 0;
+    const BOOL show_keybinds = index == 1;
     ShowWindow(znap_general_page, show_general ? SW_SHOW : SW_HIDE);
-    ShowWindow(znap_keybinds_page, show_general ? SW_HIDE : SW_SHOW);
+    ShowWindow(znap_keybinds_page, show_keybinds ? SW_SHOW : SW_HIDE);
+    ShowWindow(znap_snapshots_page, index == 2 ? SW_SHOW : SW_HIDE);
     InterlockedExchange(&znap_recording_row, -1);
     if (znap_settings_tooltip != NULL) ShowWindow(znap_settings_tooltip, SW_HIDE);
 }
@@ -1100,6 +1241,8 @@ static void ZnapLayoutSettingsWindow(HWND window) {
         SWP_NOZORDER | SWP_NOACTIVATE);
     SetWindowPos(znap_keybinds_page, NULL, page_x, 0, page_width, client.bottom,
         SWP_NOZORDER | SWP_NOACTIVATE);
+    SetWindowPos(znap_snapshots_page, NULL, page_x, 0, page_width, client.bottom,
+        SWP_NOZORDER | SWP_NOACTIVATE);
 }
 
 static void ZnapSetStartupCheckboxes(BOOL normal_enabled, BOOL admin_enabled) {
@@ -1123,6 +1266,35 @@ static BOOL ZnapApplyStartupCheckboxChange(UINT id, BOOL enabled, BOOL previous_
     if (!previous_normal || ZnapSetStartupOption(0, FALSE)) return TRUE;
     ZnapSetStartupOption(1, FALSE);
     return FALSE;
+}
+
+static void ZnapEnableSnapshotFields(UINT snapshot_index, BOOL enabled) {
+    if (snapshot_index >= ZNAP_SNAPSHOT_COUNT) return;
+    for (UINT application = 0; application < ZNAP_SNAPSHOT_APPLICATION_CAPACITY; application++) {
+        for (UINT field = 0; field < ZNAP_SNAPSHOT_FIELD_COUNT; field++) {
+            if (znap_snapshot_fields[snapshot_index][application][field] != NULL) {
+                EnableWindow(znap_snapshot_fields[snapshot_index][application][field], enabled);
+            }
+        }
+    }
+}
+
+static void ZnapRefreshSharedSnapshotField(UINT snapshot_index, UINT application_index, UINT field) {
+    const ULONGLONG window_id = ZnapGetSnapshotApplicationWindowId(snapshot_index, application_index);
+    if (window_id == 0 || field >= ZNAP_SNAPSHOT_FIELD_COUNT) return;
+    znap_updating_snapshot_fields = TRUE;
+    for (UINT other_snapshot = 0; other_snapshot < ZNAP_SNAPSHOT_COUNT; other_snapshot++) {
+        for (UINT other_application = 0; other_application < ZNAP_SNAPSHOT_APPLICATION_CAPACITY; other_application++) {
+            if (other_snapshot == snapshot_index && other_application == application_index) continue;
+            HWND edit = znap_snapshot_fields[other_snapshot][other_application][field];
+            if (edit == NULL || ZnapGetSnapshotApplicationWindowId(other_snapshot, other_application) != window_id) continue;
+            WCHAR value[ZNAP_SNAPSHOT_TEXT_CAPACITY] = {0};
+            if (ZnapGetSnapshotApplicationText(other_snapshot, other_application, field, value, ARRAYSIZE(value))) {
+                SetWindowTextW(edit, value);
+            }
+        }
+    }
+    znap_updating_snapshot_fields = FALSE;
 }
 
 static LRESULT CALLBACK ZnapSettingsProc(HWND window, UINT message, WPARAM wparam, LPARAM lparam) {
@@ -1259,6 +1431,33 @@ static LRESULT CALLBACK ZnapSettingsProc(HWND window, UINT message, WPARAM wpara
                 }
                 return 0;
             }
+            if (id >= ZNAP_SNAPSHOT_AUTOSTART_BASE && id < ZNAP_SNAPSHOT_AUTOSTART_BASE + ZNAP_SNAPSHOT_COUNT && notification == BN_CLICKED) {
+                const UINT snapshot_index = id - ZNAP_SNAPSHOT_AUTOSTART_BASE;
+                HWND checkbox = (HWND)lparam;
+                const BOOL enabled = SendMessageW(checkbox, BM_GETCHECK, 0, 0) == BST_CHECKED;
+                if (!ZnapUpdateSnapshotAutoStart(snapshot_index, enabled)) {
+                    SendMessageW(checkbox, BM_SETCHECK, enabled ? BST_UNCHECKED : BST_CHECKED, 0);
+                    MessageBoxW(window, L"The snapshot application settings could not be saved.", L"Znap Settings", MB_OK | MB_ICONERROR);
+                } else {
+                    ZnapEnableSnapshotFields(snapshot_index, enabled);
+                }
+                return 0;
+            }
+            if (id >= ZNAP_SNAPSHOT_FIELD_BASE && id < ZNAP_SNAPSHOT_FIELD_BASE + ZNAP_SNAPSHOT_COUNT * ZNAP_SNAPSHOT_APPLICATION_CAPACITY * ZNAP_SNAPSHOT_FIELD_COUNT && notification == EN_CHANGE) {
+                if (znap_updating_snapshot_fields) return 0;
+                const UINT offset = id - ZNAP_SNAPSHOT_FIELD_BASE;
+                const UINT snapshot_index = offset / (ZNAP_SNAPSHOT_APPLICATION_CAPACITY * ZNAP_SNAPSHOT_FIELD_COUNT);
+                const UINT application_index = (offset / ZNAP_SNAPSHOT_FIELD_COUNT) % ZNAP_SNAPSHOT_APPLICATION_CAPACITY;
+                const UINT field = offset % ZNAP_SNAPSHOT_FIELD_COUNT;
+                WCHAR value[ZNAP_SNAPSHOT_TEXT_CAPACITY];
+                GetWindowTextW((HWND)lparam, value, ARRAYSIZE(value));
+                if (!ZnapUpdateSnapshotApplication(snapshot_index, application_index, field, value)) {
+                    MessageBoxW(window, L"The application information could not be saved.", L"Znap Settings", MB_OK | MB_ICONERROR);
+                } else {
+                    ZnapRefreshSharedSnapshotField(snapshot_index, application_index, field);
+                }
+                return 0;
+            }
             if (id == ZNAP_OPEN_WINDOWS_SETTINGS && notification == BN_CLICKED) {
                 ShellExecuteW(window, L"open", L"ms-settings:multitasking", NULL, NULL, SW_SHOWNORMAL);
                 return 0;
@@ -1327,6 +1526,7 @@ static LRESULT CALLBACK ZnapSettingsProc(HWND window, UINT message, WPARAM wpara
             RECT *suggested = (RECT *)lparam;
             ZnapScrollSettingsPage(znap_general_page, 0);
             ZnapScrollSettingsPage(znap_keybinds_page, 0);
+            ZnapScrollSettingsPage(znap_snapshots_page, 0);
             znap_settings_dpi = new_dpi;
             if (old_dpi != 0 && new_dpi != old_dpi) {
                 ZnapDpiScaleContext context = { old_dpi, new_dpi };
@@ -1402,12 +1602,15 @@ static LRESULT CALLBACK ZnapSettingsProc(HWND window, UINT message, WPARAM wpara
             znap_settings_navigation = NULL;
             znap_general_page = NULL;
             znap_keybinds_page = NULL;
+            znap_snapshots_page = NULL;
             znap_startup_normal = NULL;
             znap_startup_admin = NULL;
             znap_startup_info = NULL;
             znap_smart_fill_info = NULL;
             ZeroMemory(znap_cycle_widths, sizeof(znap_cycle_widths));
             ZeroMemory(znap_cycle_default_boxes, sizeof(znap_cycle_default_boxes));
+            ZeroMemory(znap_snapshot_autostart, sizeof(znap_snapshot_autostart));
+            ZeroMemory(znap_snapshot_fields, sizeof(znap_snapshot_fields));
             znap_section_header_count = 0;
             znap_settings_tooltip = NULL;
             znap_settings_row_count = 0;
@@ -1440,7 +1643,106 @@ static void ZnapEnsureSettingsClass(HINSTANCE instance) {
     RegisterClassExW(&page_class);
 }
 
-void ZnapShowSettingsDialog(HINSTANCE instance, HWND owner, const ZnapKeymapRow *rows, UINT row_count, UINT general_count, BOOL show_snap_warning, BOOL startup_enabled, BOOL admin_startup_enabled, UINT edge_cycles, UINT corner_cycles, UINT center_cycles, UINT default_edge_cycle_width, UINT default_corner_cycle_width, UINT default_center_cycle_width, BOOL smart_fill) {
+static BOOL CALLBACK ZnapDestroySettingsChild(HWND child, LPARAM unused) {
+    (void)unused;
+    DestroyWindow(child);
+    return TRUE;
+}
+
+static void ZnapRemoveSnapshotSectionHeaders(void) {
+    UINT output = 0;
+    for (UINT index = 0; index < znap_section_header_count; index++) {
+        HWND header = znap_section_headers[index];
+        if (IsWindow(header) && GetParent(header) != znap_snapshots_page) {
+            znap_section_headers[output++] = header;
+        }
+    }
+    znap_section_header_count = output;
+}
+
+static void ZnapBuildSnapshotsPage(const UINT *snapshot_application_counts, UINT stored_snapshot_mask, UINT auto_start_snapshot_mask) {
+    if (znap_snapshots_page == NULL) return;
+    SCROLLINFO scroll = { sizeof(scroll), SIF_POS };
+    GetScrollInfo(znap_snapshots_page, SB_VERT, &scroll);
+    ZnapScrollSettingsPage(znap_snapshots_page, 0);
+    ZnapRemoveSnapshotSectionHeaders();
+    EnumChildWindows(znap_snapshots_page, ZnapDestroySettingsChild, 0);
+    ZeroMemory(znap_snapshot_autostart, sizeof(znap_snapshot_autostart));
+    ZeroMemory(znap_snapshot_fields, sizeof(znap_snapshot_fields));
+
+    znap_updating_snapshot_fields = TRUE;
+    int y = 20;
+    BOOL any_snapshots = FALSE;
+    const WCHAR *field_labels[ZNAP_SNAPSHOT_FIELD_COUNT] = {
+        L"Executable:", L"Arguments:", L"Working directory:", L"App User Model ID:",
+    };
+    for (UINT snapshot_index = 0; snapshot_index < ZNAP_SNAPSHOT_COUNT; snapshot_index++) {
+        if ((stored_snapshot_mask & (1u << snapshot_index)) == 0) continue;
+        if (any_snapshots) {
+            ZnapCreateSettingsControl(0, L"STATIC", L"", SS_ETCHEDHORZ, 20, y, 650, 2, znap_snapshots_page, 0);
+            y += 20;
+        }
+        any_snapshots = TRUE;
+        WCHAR snapshot_title[64];
+        wsprintfW(snapshot_title, L"Snapshot %u", snapshot_index + 1);
+        ZnapCreateSettingsHeader(snapshot_title, y, znap_snapshots_page);
+        y += 36;
+        const BOOL auto_start = (auto_start_snapshot_mask & (1u << snapshot_index)) != 0;
+        znap_snapshot_autostart[snapshot_index] = ZnapCreateLargeCheckbox(L"Auto Start Applications", y, znap_snapshots_page, ZNAP_SNAPSHOT_AUTOSTART_BASE + snapshot_index);
+        SendMessageW(znap_snapshot_autostart[snapshot_index], BM_SETCHECK, auto_start ? BST_CHECKED : BST_UNCHECKED, 0);
+        y += 42;
+
+        UINT application_count = snapshot_application_counts != NULL ? snapshot_application_counts[snapshot_index] : 0;
+        application_count = min(application_count, ZNAP_SNAPSHOT_APPLICATION_CAPACITY);
+        if (application_count == 0) {
+            ZnapCreateSettingsControl(0, L"STATIC", L"No application information was captured.", SS_LEFT, 28, y, 620, 28, znap_snapshots_page, 0);
+            y += 38;
+        }
+        for (UINT application_index = 0; application_index < application_count; application_index++) {
+            WCHAR application_title[64];
+            wsprintfW(application_title, L"Application %u", application_index + 1);
+            ZnapCreateSettingsControl(0, L"STATIC", application_title, SS_LEFT, 28, y, 620, 26, znap_snapshots_page, 0);
+            y += 30;
+            for (UINT field = 0; field < ZNAP_SNAPSHOT_FIELD_COUNT; field++) {
+                WCHAR value[ZNAP_SNAPSHOT_TEXT_CAPACITY] = {0};
+                ZnapGetSnapshotApplicationText(snapshot_index, application_index, field, value, ARRAYSIZE(value));
+                ZnapCreateSettingsControl(0, L"STATIC", field_labels[field], SS_RIGHT, 28, y + 4, 170, 22, znap_snapshots_page, 0);
+                const UINT id = ZNAP_SNAPSHOT_FIELD_BASE + (snapshot_index * ZNAP_SNAPSHOT_APPLICATION_CAPACITY + application_index) * ZNAP_SNAPSHOT_FIELD_COUNT + field;
+                HWND edit = ZnapCreateSettingsControl(WS_EX_CLIENTEDGE, L"EDIT", value, ES_AUTOHSCROLL | WS_TABSTOP, 210, y, 440, 27, znap_snapshots_page, id);
+                znap_snapshot_fields[snapshot_index][application_index][field] = edit;
+                SendMessageW(edit, EM_SETLIMITTEXT, ZNAP_SNAPSHOT_TEXT_CAPACITY - 1, 0);
+                EnableWindow(edit, auto_start);
+                y += 34;
+            }
+            WCHAR hwnd_value[32];
+            const UINT_PTR application_hwnd = ZnapGetSnapshotApplicationHwnd(snapshot_index, application_index);
+            if (application_hwnd != 0) wsprintfW(hwnd_value, L"0x%p", (void *)application_hwnd);
+            else lstrcpynW(hwnd_value, L"Not running", ARRAYSIZE(hwnd_value));
+            ZnapCreateSettingsControl(0, L"STATIC", L"HWND:", SS_RIGHT, 28, y + 4, 170, 22, znap_snapshots_page, 0);
+            ZnapCreateSettingsControl(0, L"STATIC", hwnd_value, SS_LEFT | SS_NOPREFIX, 210, y + 4, 440, 22, znap_snapshots_page, 0);
+            y += 52;
+        }
+        y += ZNAP_SECTION_GAP;
+    }
+    if (!any_snapshots) {
+        ZnapCreateSettingsHeader(L"Snapshots", y, znap_snapshots_page);
+        y += 38;
+        ZnapCreateSettingsControl(0, L"STATIC", L"Capture a snapshot to see its applications here.", SS_LEFT, 28, y, 620, 28, znap_snapshots_page, 0);
+        y += 40;
+    }
+    znap_snapshots_content_height = y + 20;
+    znap_updating_snapshot_fields = FALSE;
+    ZnapUpdatePageScrollbar(znap_snapshots_page);
+    ZnapScrollSettingsPage(znap_snapshots_page, scroll.nPos);
+    RedrawWindow(znap_snapshots_page, NULL, NULL, RDW_INVALIDATE | RDW_ALLCHILDREN | RDW_ERASE | RDW_UPDATENOW);
+}
+
+void ZnapRefreshSnapshotSettings(const UINT *snapshot_application_counts, UINT stored_snapshot_mask, UINT auto_start_snapshot_mask) {
+    if (znap_settings_window == NULL || znap_snapshots_page == NULL) return;
+    ZnapBuildSnapshotsPage(snapshot_application_counts, stored_snapshot_mask, auto_start_snapshot_mask);
+}
+
+void ZnapShowSettingsDialog(HINSTANCE instance, HWND owner, const ZnapKeymapRow *rows, UINT row_count, UINT general_count, BOOL show_snap_warning, BOOL startup_enabled, BOOL admin_startup_enabled, UINT edge_cycles, UINT corner_cycles, UINT center_cycles, UINT default_edge_cycle_width, UINT default_corner_cycle_width, UINT default_center_cycle_width, BOOL smart_fill, const UINT *snapshot_application_counts, UINT stored_snapshot_mask, UINT auto_start_snapshot_mask) {
     if (znap_settings_window != NULL) {
         ShowWindow(znap_settings_window, SW_RESTORE);
         SetForegroundWindow(znap_settings_window);
@@ -1455,6 +1757,7 @@ void ZnapShowSettingsDialog(HINSTANCE instance, HWND owner, const ZnapKeymapRow 
     znap_settings_window = CreateWindowExW(WS_EX_DLGMODALFRAME, ZNAP_SETTINGS_CLASS, L"Znap Settings", WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU,
         CW_USEDEFAULT, CW_USEDEFAULT, ZnapScale(ZNAP_SETTINGS_WIDTH), ZnapScale(ZNAP_SETTINGS_HEIGHT), owner, NULL, instance, NULL);
     if (znap_settings_window == NULL) return;
+    znap_updating_snapshot_fields = TRUE;
     const UINT window_dpi = GetDpiForWindow(znap_settings_window);
     if (window_dpi != 0 && window_dpi != znap_settings_dpi) {
         znap_settings_dpi = window_dpi;
@@ -1480,6 +1783,7 @@ void ZnapShowSettingsDialog(HINSTANCE instance, HWND owner, const ZnapKeymapRow 
     SendMessageW(znap_settings_navigation, LB_SETITEMHEIGHT, 0, ZnapScale(ZNAP_NAVIGATION_ITEM_HEIGHT));
     SendMessageW(znap_settings_navigation, LB_ADDSTRING, 0, (LPARAM)L"General");
     SendMessageW(znap_settings_navigation, LB_ADDSTRING, 0, (LPARAM)L"Keybinds");
+    SendMessageW(znap_settings_navigation, LB_ADDSTRING, 0, (LPARAM)L"Snapshots");
     SendMessageW(znap_settings_navigation, LB_SETCURSEL, 0, 0);
 
     znap_general_page = CreateWindowExW(0, ZNAP_SETTINGS_PAGE_CLASS, L"",
@@ -1488,8 +1792,12 @@ void ZnapShowSettingsDialog(HINSTANCE instance, HWND owner, const ZnapKeymapRow 
     znap_keybinds_page = CreateWindowExW(0, ZNAP_SETTINGS_PAGE_CLASS, L"",
         WS_CHILD | WS_VSCROLL | WS_CLIPCHILDREN,
         242, 16, 720, 640, znap_settings_window, NULL, instance, NULL);
+    znap_snapshots_page = CreateWindowExW(0, ZNAP_SETTINGS_PAGE_CLASS, L"",
+        WS_CHILD | WS_VSCROLL | WS_CLIPCHILDREN,
+        242, 16, 720, 640, znap_settings_window, NULL, instance, NULL);
     ZnapApplyThemeToChild(znap_general_page, 0);
     ZnapApplyThemeToChild(znap_keybinds_page, 0);
+    ZnapApplyThemeToChild(znap_snapshots_page, 0);
 
     int startup_y = 20;
     if (show_snap_warning) {
@@ -1581,9 +1889,12 @@ void ZnapShowSettingsDialog(HINSTANCE instance, HWND owner, const ZnapKeymapRow 
         y += 32;
     }
     znap_keybinds_content_height = y + 20;
+
+    ZnapBuildSnapshotsPage(snapshot_application_counts, stored_snapshot_mask, auto_start_snapshot_mask);
     ZnapLayoutSettingsWindow(znap_settings_window);
     ZnapUpdatePageScrollbar(znap_general_page);
     ZnapUpdatePageScrollbar(znap_keybinds_page);
+    ZnapUpdatePageScrollbar(znap_snapshots_page);
     ZnapShowSettingsPage(0);
 
     ZnapCenterDialog(znap_settings_window);

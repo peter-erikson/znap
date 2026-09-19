@@ -47,6 +47,36 @@ pub const Keymap = struct {
     snapshot_index: ?u4 = null,
 };
 
+pub const SnapshotApplication = struct {
+    window_id: u64 = 0,
+    last_hwnd: u64 = 0,
+    executable: []const u8 = "",
+    arguments: []const u8 = "",
+    working_directory: []const u8 = "",
+    app_user_model_id: []const u8 = "",
+    placement: ?SnapshotPlacement = null,
+};
+
+pub const SnapshotPlacement = struct {
+    flags: u32 = 0,
+    show_command: u32 = 1,
+    minimized_x: i32 = 0,
+    minimized_y: i32 = 0,
+    maximized_x: i32 = 0,
+    maximized_y: i32 = 0,
+    normal_left: i32,
+    normal_top: i32,
+    normal_right: i32,
+    normal_bottom: i32,
+};
+
+pub const Snapshot = struct {
+    index: u4,
+    auto_start: bool = true,
+    applications: []const SnapshotApplication = &.{},
+    focused_application: ?u8 = null,
+};
+
 pub const CycleWidth = enum {
     @"1/4",
     @"1/3",
@@ -69,6 +99,7 @@ pub const Settings = struct {
     default_corner_cycle_width: ?CycleWidth = null,
     default_center_cycle_width: ?CycleWidth = null,
     smart_fill: ?bool = null,
+    snapshots: ?[]const Snapshot = null,
     // Deprecated aliases retained so existing settings files can be migrated.
     smart_edge_fill: ?bool = null,
     smart_corner_fill: ?bool = null,
@@ -90,6 +121,7 @@ pub const LoadedSettings = struct {
     default_corner_cycle_width: CycleWidth,
     default_center_cycle_width: CycleWidth,
     smart_fill: bool,
+    snapshots: []const Snapshot,
     path: []const u8,
 };
 
@@ -102,6 +134,7 @@ const ParsedSettings = struct {
     default_corner_cycle_width: CycleWidth,
     default_center_cycle_width: CycleWidth,
     smart_fill: bool,
+    snapshots: []const Snapshot,
     migrated: bool,
 };
 
@@ -169,6 +202,7 @@ pub fn load(
                 .default_corner_cycle_width = default_cycle_width,
                 .default_center_cycle_width = default_cycle_width,
                 .smart_fill = true,
+                .snapshots = &.{},
                 .path = settings_path,
             };
         },
@@ -183,6 +217,7 @@ pub fn load(
                 .default_corner_cycle_width = default_cycle_width,
                 .default_center_cycle_width = default_cycle_width,
                 .smart_fill = true,
+                .snapshots = &.{},
                 .path = settings_path,
             };
         },
@@ -200,11 +235,12 @@ pub fn load(
             .default_corner_cycle_width = default_cycle_width,
             .default_center_cycle_width = default_cycle_width,
             .smart_fill = true,
+            .snapshots = &.{},
             .path = settings_path,
         };
     };
     if (parsed.migrated) {
-        save(io, allocator, settings_path, parsed.keymaps, parsed.edge_cycles, parsed.corner_cycles, parsed.center_cycles, parsed.default_edge_cycle_width, parsed.default_corner_cycle_width, parsed.default_center_cycle_width, parsed.smart_fill) catch |err| {
+        save(io, allocator, settings_path, parsed.keymaps, parsed.edge_cycles, parsed.corner_cycles, parsed.center_cycles, parsed.default_edge_cycle_width, parsed.default_corner_cycle_width, parsed.default_center_cycle_width, parsed.smart_fill, parsed.snapshots) catch |err| {
             std.log.warn("could not save migrated settings file: {s}", .{@errorName(err)});
         };
     }
@@ -217,6 +253,7 @@ pub fn load(
         .default_corner_cycle_width = parsed.default_corner_cycle_width,
         .default_center_cycle_width = parsed.default_center_cycle_width,
         .smart_fill = parsed.smart_fill,
+        .snapshots = parsed.snapshots,
         .path = settings_path,
     };
 }
@@ -331,6 +368,7 @@ fn parseSettings(allocator: std.mem.Allocator, contents: []const u8) !ParsedSett
     const default_center_cycle_width = normalizedDefaultWidth(center_cycles, parsed.value.default_center_cycle_width);
     const smart_fill = parsed.value.smart_fill orelse
         ((parsed.value.smart_edge_fill orelse true) and (parsed.value.smart_corner_fill orelse true));
+    const loaded_snapshots = try cloneSnapshots(allocator, parsed.value.snapshots orelse &.{});
     return .{
         .keymaps = loaded,
         .edge_cycles = edge_cycles,
@@ -340,6 +378,7 @@ fn parseSettings(allocator: std.mem.Allocator, contents: []const u8) !ParsedSett
         .default_corner_cycle_width = default_corner_cycle_width,
         .default_center_cycle_width = default_center_cycle_width,
         .smart_fill = smart_fill,
+        .snapshots = loaded_snapshots,
         .migrated = active_count != parsed.value.keymaps.len or
             parsed.value.edge_cycles == null or
             parsed.value.corner_cycles == null or
@@ -351,6 +390,58 @@ fn parseSettings(allocator: std.mem.Allocator, contents: []const u8) !ParsedSett
             parsed.value.smart_edge_fill != null or
             parsed.value.smart_corner_fill != null,
     };
+}
+
+fn cloneSnapshots(allocator: std.mem.Allocator, source: []const Snapshot) ![]const Snapshot {
+    if (source.len > 10) return error.TooManySnapshots;
+    const result = try allocator.alloc(Snapshot, source.len);
+    var initialized: usize = 0;
+    errdefer {
+        for (result[0..initialized]) |snapshot| {
+            for (snapshot.applications) |application| {
+                allocator.free(application.executable);
+                allocator.free(application.arguments);
+                allocator.free(application.working_directory);
+                allocator.free(application.app_user_model_id);
+            }
+            allocator.free(snapshot.applications);
+        }
+        allocator.free(result);
+    }
+    for (source, result) |snapshot, *output| {
+        if (snapshot.applications.len > 64) return error.TooManySnapshotApplications;
+        const applications = try allocator.alloc(SnapshotApplication, snapshot.applications.len);
+        var app_count: usize = 0;
+        errdefer {
+            for (applications[0..app_count]) |application| {
+                allocator.free(application.executable);
+                allocator.free(application.arguments);
+                allocator.free(application.working_directory);
+                allocator.free(application.app_user_model_id);
+            }
+            allocator.free(applications);
+        }
+        for (snapshot.applications, applications) |application, *app_output| {
+            app_output.* = .{
+                .window_id = application.window_id,
+                .last_hwnd = application.last_hwnd,
+                .executable = try allocator.dupe(u8, application.executable),
+                .arguments = try allocator.dupe(u8, application.arguments),
+                .working_directory = try allocator.dupe(u8, application.working_directory),
+                .app_user_model_id = try allocator.dupe(u8, application.app_user_model_id),
+                .placement = application.placement,
+            };
+            app_count += 1;
+        }
+        output.* = .{
+            .index = snapshot.index,
+            .auto_start = snapshot.auto_start,
+            .applications = applications,
+            .focused_application = snapshot.focused_application,
+        };
+        initialized += 1;
+    }
+    return result;
 }
 
 pub fn parse(allocator: std.mem.Allocator, contents: []const u8) ![]LoadedKeymap {
@@ -387,6 +478,7 @@ pub fn save(
     default_corner_cycle_width: CycleWidth,
     default_center_cycle_width: CycleWidth,
     smart_fill: bool,
+    snapshots: []const Snapshot,
 ) !void {
     if (edge_cycles == 0 or corner_cycles == 0 or center_cycles == 0) return error.EmptyCycleWidths;
     if (!defaultWidthIsValid(edge_cycles, default_edge_cycle_width) or
@@ -436,6 +528,7 @@ pub fn save(
             .default_corner_cycle_width = default_corner_cycle_width,
             .default_center_cycle_width = default_center_cycle_width,
             .smart_fill = smart_fill,
+            .snapshots = snapshots,
         },
         .{ .whitespace = .indent_2, .emit_null_optional_fields = false },
     )});
@@ -612,6 +705,61 @@ test "parses configured cycle widths" {
     try std.testing.expectEqual(CycleWidth.@"1/2", parsed.default_corner_cycle_width);
     try std.testing.expectEqual(CycleWidth.@"2/3", parsed.default_center_cycle_width);
     try std.testing.expect(!parsed.smart_fill);
+}
+
+test "parses persisted snapshot applications" {
+    const parsed = try parseSettings(std.testing.allocator,
+        \\{"keymaps":[],"snapshots":[{"index":2,"auto_start":true,"applications":[{"executable":"C:\\Tools\\app.exe","arguments":"--restore","working_directory":"C:\\Tools","app_user_model_id":"Example.App"}]}]}
+    );
+    defer std.testing.allocator.free(parsed.keymaps);
+    defer {
+        for (parsed.snapshots) |snapshot| {
+            for (snapshot.applications) |application| {
+                std.testing.allocator.free(application.executable);
+                std.testing.allocator.free(application.arguments);
+                std.testing.allocator.free(application.working_directory);
+                std.testing.allocator.free(application.app_user_model_id);
+            }
+            std.testing.allocator.free(snapshot.applications);
+        }
+        std.testing.allocator.free(parsed.snapshots);
+    }
+    try std.testing.expectEqual(@as(usize, 1), parsed.snapshots.len);
+    try std.testing.expectEqual(@as(u4, 2), parsed.snapshots[0].index);
+    try std.testing.expect(parsed.snapshots[0].auto_start);
+    try std.testing.expectEqual(@as(u64, 0), parsed.snapshots[0].applications[0].window_id);
+    try std.testing.expectEqual(@as(u64, 0), parsed.snapshots[0].applications[0].last_hwnd);
+    try std.testing.expectEqualStrings("C:\\Tools\\app.exe", parsed.snapshots[0].applications[0].executable);
+    try std.testing.expectEqualStrings("--restore", parsed.snapshots[0].applications[0].arguments);
+    try std.testing.expectEqualStrings("Example.App", parsed.snapshots[0].applications[0].app_user_model_id);
+    try std.testing.expectEqual(@as(?SnapshotPlacement, null), parsed.snapshots[0].applications[0].placement);
+}
+
+test "parses persisted snapshot window layout" {
+    const parsed = try parseSettings(std.testing.allocator,
+        \\{"keymaps":[],"snapshots":[{"index":1,"focused_application":0,"applications":[{"window_id":42,"last_hwnd":65538,"executable":"Spotify.exe","placement":{"show_command":3,"normal_left":10,"normal_top":20,"normal_right":810,"normal_bottom":620}}]}]}
+    );
+    defer std.testing.allocator.free(parsed.keymaps);
+    defer {
+        for (parsed.snapshots) |snapshot| {
+            for (snapshot.applications) |application| {
+                std.testing.allocator.free(application.executable);
+                std.testing.allocator.free(application.arguments);
+                std.testing.allocator.free(application.working_directory);
+                std.testing.allocator.free(application.app_user_model_id);
+            }
+            std.testing.allocator.free(snapshot.applications);
+        }
+        std.testing.allocator.free(parsed.snapshots);
+    }
+
+    try std.testing.expectEqual(@as(?u8, 0), parsed.snapshots[0].focused_application);
+    try std.testing.expectEqual(@as(u64, 42), parsed.snapshots[0].applications[0].window_id);
+    try std.testing.expectEqual(@as(u64, 65538), parsed.snapshots[0].applications[0].last_hwnd);
+    const placement = parsed.snapshots[0].applications[0].placement.?;
+    try std.testing.expectEqual(@as(u32, 3), placement.show_command);
+    try std.testing.expectEqual(@as(i32, 10), placement.normal_left);
+    try std.testing.expectEqual(@as(i32, 620), placement.normal_bottom);
 }
 
 test "legacy smart fill settings migrate to one conservative value" {
