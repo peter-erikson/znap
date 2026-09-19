@@ -21,6 +21,7 @@ const znap_registry_key = std.unicode.utf8ToUtf16LeStringLiteral("SOFTWARE\\Znap
 const snap_warning_shown_value = std.unicode.utf8ToUtf16LeStringLiteral("WindowsSnapWarningShown");
 const single_instance_mutex_name = std.unicode.utf8ToUtf16LeStringLiteral("Local\\Znap.SingleInstance");
 const already_running_message = std.unicode.utf8ToUtf16LeStringLiteral("Znap is already running.");
+const taskbar_created_name = std.unicode.utf8ToUtf16LeStringLiteral("TaskbarCreated");
 
 const tray_message = c.WM_APP + 1;
 const hotkey_message = c.WM_APP + 2;
@@ -46,6 +47,7 @@ const SnapTransition = enum {
 };
 
 var message_window: c.HWND = null;
+var taskbar_created_message: c.UINT = 0;
 var keyboard_hook: c.HHOOK = null;
 var keyboard_hook_ready: c.HANDLE = null;
 var keyboard_hook_thread_id: c.DWORD = 0;
@@ -136,6 +138,8 @@ pub fn main(init: std.process.Init) !void {
     settings_file_path = loaded_settings.path;
 
     const instance = c.GetModuleHandleW(null);
+    taskbar_created_message = c.RegisterWindowMessageW(taskbar_created_name);
+    if (taskbar_created_message == 0) return error.RegisterTaskbarCreatedMessageFailed;
     if (windowsSnapEnabled() and !snapWarningShown()) {
         c.ZnapShowSnapWarning(instance);
         markSnapWarningShown();
@@ -150,6 +154,12 @@ pub fn main(init: std.process.Init) !void {
 
     message_window = c.CreateWindowExW(0, class_name, app_name, 0, 0, 0, 0, 0, null, null, instance, null);
     if (message_window == null) return error.CreateMessageWindowFailed;
+
+    // Explorer runs without elevation, so its TaskbarCreated broadcast is
+    // otherwise blocked by UIPI when Znap is running as administrator.
+    if (c.ChangeWindowMessageFilterEx(message_window, taskbar_created_message, c.MSGFLT_ALLOW, null) == 0) {
+        return error.AllowTaskbarCreatedMessageFailed;
+    }
 
     addTrayIcon(instance) catch |err| {
         std.log.err("failed to add notification-area icon: {s}", .{@errorName(err)});
@@ -235,6 +245,11 @@ fn markSnapWarningShown() void {
 }
 
 fn windowProc(hwnd: c.HWND, message: c.UINT, wparam: c.WPARAM, lparam: c.LPARAM) callconv(.c) c.LRESULT {
+    if (message == taskbar_created_message) {
+        restoreTrayIcon();
+        return 0;
+    }
+
     switch (message) {
         hotkey_message => handleHotkey(@intCast(wparam)),
         tray_message => handleTrayMessage(hwnd, lparam),
@@ -1030,6 +1045,14 @@ fn addTrayIcon(instance: c.HINSTANCE) !void {
         if (attempt == 29) return error.AddTrayIconFailed;
         c.Sleep(1000);
     }
+    setTrayIconVersion();
+}
+
+fn restoreTrayIcon() void {
+    if (c.Shell_NotifyIconW(c.NIM_ADD, &tray_data) != 0) setTrayIconVersion();
+}
+
+fn setTrayIconVersion() void {
     tray_data.unnamed_0.uVersion = c.NOTIFYICON_VERSION_4;
     _ = c.Shell_NotifyIconW(c.NIM_SETVERSION, &tray_data);
 }
