@@ -185,7 +185,10 @@ fn loadWindowId(saved: u64) u64 {
 fn hwndFromStoredValue(saved: u64) c.HWND {
     if (saved == 0) return null;
     const address = std.math.cast(usize, saved) orelse return null;
-    return @ptrFromInt(address);
+    // Win32 handles are opaque integer-like tokens and are not guaranteed to
+    // satisfy Zig's pointer-alignment rules. Perform the conversion in C,
+    // where HWND's representation permits those values without dereferencing.
+    return c.ZnapHwndFromUintPtr(address);
 }
 
 fn loadSnapshotSettings(loaded: []const settings.Snapshot) void {

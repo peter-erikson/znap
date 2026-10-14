@@ -18,6 +18,10 @@
 #define ZNAP_LEGACY_STARTUP_KEY L"SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Run"
 #define ZNAP_LEGACY_STARTUP_VALUE L"Znap"
 
+HWND ZnapHwndFromUintPtr(UINT_PTR value) {
+    return (HWND)value;
+}
+
 BOOL ZnapGetWindowApplicationInfo(HWND hwnd, WCHAR *executable, UINT executable_capacity, WCHAR *app_user_model_id, UINT app_user_model_id_capacity) {
     if (executable == NULL || executable_capacity == 0 || app_user_model_id == NULL || app_user_model_id_capacity == 0) return FALSE;
     executable[0] = L'\0';

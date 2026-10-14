@@ -13,6 +13,7 @@
 
 DPI_AWARENESS_CONTEXT ZnapPerMonitorV2(void);
 void ZnapSwitchToThisWindow(HWND hwnd);
+HWND ZnapHwndFromUintPtr(UINT_PTR value);
 HWND ZnapHwndTopmost(void);
 HWND ZnapHwndNotopmost(void);
 HKEY ZnapHkeyCurrentUser(void);
